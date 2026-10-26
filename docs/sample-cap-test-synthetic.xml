@@ -1,0 +1,78 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>UG-EWS-DEMO.SYN020.20261026T111057</identifier>
+  <sender>ews-demo@example.org</sender>
+  <sent>2026-10-26T11:10:57+03:00</sent>
+  <status>Test</status>
+  <msgType>Alert</msgType>
+  <source>Uganda EWS demo pipeline (run 1)</source>
+  <scope>Public</scope>
+  <note>TEST MESSAGE - not an official warning. Produced by a demonstration pipeline; warning authority rests with the designated national approving authority. Generated from SYNTHETIC test data.</note>
+  <incidents>UG-EWS-DEMO-SYN020-20220731</incidents>
+  <info>
+    <language>en</language>
+    <category>Met</category>
+    <event>Heavy rainfall</event>
+    <responseType>Prepare</responseType>
+    <urgency>Expected</urgency>
+    <severity>Severe</severity>
+    <certainty>Likely</certainty>
+    <eventCode>
+      <valueName>UG-EWS:trigger</valueName>
+      <value>FIXED_MEAN_80,P95_AREA50,FIXED_MAX_100,P95_MEAN</value>
+    </eventCode>
+    <effective>2026-10-26T11:10:57+03:00</effective>
+    <onset>2026-10-26T11:10:57+03:00</onset>
+    <expires>2026-10-28T11:10:57+03:00</expires>
+    <senderName>Uganda national EWS demonstration (unofficial)</senderName>
+    <headline>TEST: Heavy rainfall warning: Bududa (synthetic zone) - 3-day total 135 mm, 3.2x the seasonal 95th percentile</headline>
+    <description>Rainfall in the 3 days to 31 Jul 2022 averaged 135 mm over Bududa (synthetic zone), 3.2 times the district's 1991-2020 95th percentile of 3-day totals for this time of year (43 mm; seasonal mean 14 mm). 100% of the district was above its local 95th percentile and the wettest location received 166 mm. Triggers met: Wettest location in the district received at least 100 mm in 3 days; District-mean 3-day rainfall of at least 80 mm; At least half of the district above its local 1991-2020 95th percentile of 3-day totals (and a district mean of at least 50 mm); 3-day district-mean rainfall above the district-mean 95th percentile of 1991-2020 3-day totals for this time of year (and at least 40 mm). Data: SYNTHETIC.</description>
+    <instruction>Flooding, flash floods and landslides are likely in low-lying areas, along rivers and on steep slopes. District disaster management committees: activate contingency plans and prepare to move people out of high-risk areas. Public: do not cross flooded rivers or streams, keep away from landslide-prone slopes and follow instructions from local authorities.</instruction>
+    <web>https://example.org/ews-demo</web>
+    <contact>Duty officer, national situation room (demo)</contact>
+    <parameter>
+      <valueName>ACCUM_DAYS</valueName>
+      <value>3</value>
+    </parameter>
+    <parameter>
+      <valueName>ACCUM_END_DATE</valueName>
+      <value>2022-07-31</value>
+    </parameter>
+    <parameter>
+      <valueName>ACCUM_MEAN_MM</valueName>
+      <value>135.4</value>
+    </parameter>
+    <parameter>
+      <valueName>ACCUM_MAX_MM</valueName>
+      <value>166.4</value>
+    </parameter>
+    <parameter>
+      <valueName>P95_1991_2020_MM</valueName>
+      <value>42.6</value>
+    </parameter>
+    <parameter>
+      <valueName>RATIO_TO_P95</valueName>
+      <value>3.18</value>
+    </parameter>
+    <parameter>
+      <valueName>AREA_FRACTION_ABOVE_P95</valueName>
+      <value>1.00</value>
+    </parameter>
+    <parameter>
+      <valueName>ALERT_LEVEL</valueName>
+      <value>warning</value>
+    </parameter>
+    <parameter>
+      <valueName>DATA_SOURCE</valueName>
+      <value>SYNTHETIC</value>
+    </parameter>
+    <area>
+      <areaDesc>Bududa (synthetic zone), Uganda (synthetic test zone)</areaDesc>
+      <polygon>0.8850,34.1803 1.2212,34.3372 1.1443,34.5872 1.1013,34.5369 1.0422,34.4829 0.8669,34.4109 0.8031,34.3550 0.8850,34.1803</polygon>
+      <geocode>
+        <valueName>SYNTHETIC-ID</valueName>
+        <value>SYN020</value>
+      </geocode>
+    </area>
+  </info>
+</alert>
