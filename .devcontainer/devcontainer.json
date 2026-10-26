@@ -1,0 +1,29 @@
+// GitHub Codespaces / VS Code dev container.
+// Creating a codespace builds the PostGIS database and the tools image, loads the offline
+// synthetic demo (`make demo`), then serves the Streamlit app on port 8501.
+{
+  "name": "Uganda rainfall EWS demo",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "dev",
+  "runServices": ["db", "dev"],
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "shutdownAction": "stopCompose",
+
+  // The editor opens once the demo database is built, so the app has data on first attach.
+  "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && make demo",
+  "waitFor": "postCreateCommand",
+  // Runs in its own terminal every time the editor attaches; Ctrl+C there stops the app.
+  "postAttachCommand": {
+    "app": "bash .devcontainer/start-app.sh"
+  },
+
+  "forwardPorts": [8501],
+  "portsAttributes": {
+    "8501": { "label": "Streamlit app", "onAutoForward": "openPreview" }
+  },
+
+  "hostRequirements": { "cpus": 2, "memory": "4gb" },
+  "customizations": {
+    "codespaces": { "openFiles": ["README.md"] }
+  }
+}

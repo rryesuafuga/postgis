@@ -7,6 +7,9 @@ and district boundaries into PostGIS, computes district rainfall statistics in S
 an operations log, exports a validated CAP 1.2 alert, and shows the result on a Streamlit map.
 It ends with a one-page runbook for backup, integrity checks and re-ingest.
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/rryesuafuga/postgis?quickstart=1)
+Run it in the browser with nothing installed: see [Quick start](#in-the-browser-github-codespaces).
+
 ```
 CHIRPS v2.0 daily GeoTIFF ─┐            ┌─ ref.district (GiST) ───────────┐
 HDX COD-AB / GADM ─────────┼─ ogr2ogr ──┘                                 │  ST_Clip / ST_SummaryStatsAgg
@@ -23,6 +26,7 @@ could not reach the tile server; the PostGIS layers draw regardless.*
 
 | Path | What it does |
 |---|---|
+| `.devcontainer/` | GitHub Codespaces: database + tools workspace, builds the demo and starts the app |
 | `docker-compose.yml` | `db`: `postgis/postgis:16-3.4`. `tools` (optional): GDAL, PostGIS loaders, psql, Python |
 | `sql/01_schema.sql` | schemas `ref`, `rain`, `ews`, `ops`; results, CAP and operations-log tables |
 | `sql/02_seed_config.sql` | alert levels, trigger rules and the level to CAP urgency/severity/certainty mapping |
@@ -39,6 +43,29 @@ could not reach the tile server; the PostGIS layers draw regardless.*
 | `tests/` | CAP, climatology and downloader tests (downloaders run against local fakes of the real formats) |
 
 ## Quick start
+
+### In the browser: GitHub Codespaces
+
+Nothing to install. A codespace is a cloud computer with an editor in your browser; this
+repository's `.devcontainer/` sets it up completely.
+
+1. Click the **Open in GitHub Codespaces** badge above (or on the repository page: green
+   **Code** button, **Codespaces** tab, **Create codespace on main**).
+2. Wait about 5 minutes the first time. GitHub builds the database and the tools image, then loads
+   the synthetic demo (`make demo`). The editor opens when that is done.
+3. The app starts by itself in a terminal named **app** and opens in a preview tab. For a full
+   browser tab, open the **Ports** panel, find port **8501**, and click the globe icon.
+
+Notes:
+* Reopening later: go to [github.com/codespaces](https://github.com/codespaces) and open the same
+  codespace; the app starts again automatically. It stops by itself after 30 minutes idle.
+* Stopped the app? In a terminal: `bash .devcontainer/start-app.sh`.
+* Showing someone else: in **Ports**, right-click 8501, **Port Visibility**, **Public**, and send the
+  link. It works only while your codespace is running.
+* Real data in a codespace: stop the app (Ctrl+C in the **app** terminal), then
+  `make init fetch load compute alert` and `bash .devcontainer/start-app.sh real`.
+* Personal GitHub accounts include a free monthly Codespaces allowance (about 60 hours on the
+  standard 2-core machine).
 
 ### A. Offline demo (synthetic data, about 15 s)
 
@@ -260,6 +287,11 @@ python -m ews log ESCALATION chirps-feed WARN "Escalated to ICPAC" --details '{"
 * `pytest`: CAP builder and validator, climatology percentiles and gap handling, and the downloaders
   against local fakes of a CHC Africa `.tif.gz`, an ERDDAP NetCDF, an HDX package with a zipped
   COD-AB shapefile, a GADM GeoPackage and an IMERG `(time, lon, lat)` file.
+* The dev container: with the dev container CLI (0.89, the engine behind Codespaces) on a fresh
+  copy of the repository. The `tools` image was built from `docker/tools.Dockerfile` separately
+  (this sandbox needs a proxy for pip), then `devcontainer up` ran `make demo` in the workspace
+  container against the `db` service, and `start-app.sh` served the app on 8501, including
+  rebuilding a missing demo database. Not yet opened in GitHub Codespaces itself.
 * **Not yet run against the live CHC, ERDDAP, HDX and GADM servers.** The build sandbox could not
   reach them. URL patterns and formats follow the providers' published conventions. Check the first
   real `make fetch` and report any 404 with `python -m ews log FAULT ...`.

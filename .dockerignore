@@ -1,0 +1,13 @@
+# The tools image only needs requirements.txt and docker/certs/: keep data and backups out of
+# the build context.
+.git
+.env
+data/
+out/
+backups/
+.venv/
+venv/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.docx

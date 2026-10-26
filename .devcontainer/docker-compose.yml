@@ -1,0 +1,38 @@
+# Dev container services (used by devcontainer.json; GitHub Codespaces starts them).
+#   db   PostGIS, reachable from the workspace as host "db"
+#   dev  the workspace: GDAL, PostGIS loaders, psql and the Python stack (docker/tools.Dockerfile)
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ews
+      POSTGRES_USER: ews
+      POSTGRES_PASSWORD: ews
+    volumes:
+      - ews-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ews -d ews"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  dev:
+    build:
+      context: ..
+      dockerfile: docker/tools.Dockerfile
+    command: sleep infinity
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ews
+      PGUSER: ews
+      PGPASSWORD: ews
+    volumes:
+      - ../..:/workspaces:cached
+
+volumes:
+  ews-pgdata:

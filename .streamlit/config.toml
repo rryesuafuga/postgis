@@ -1,0 +1,7 @@
+# Applies whenever the app is started from the repository root.
+[server]
+# No first-run e-mail prompt and no attempt to open a browser (containers, Codespaces).
+headless = true
+
+[browser]
+gatherUsageStats = false
