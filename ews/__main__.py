@@ -83,6 +83,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("message")
     s.add_argument("--details", default=None, help="JSON object")
 
+    s = sub.add_parser("site", help="export the static demo page (docs/index.html, GitHub Pages)")
+    s.add_argument("--out", type=Path, default=None)
+
     s = sub.add_parser("report", help="monthly operations report (Markdown)")
     s.add_argument("--month", help="YYYY-MM (default: current month)")
 
@@ -170,6 +173,10 @@ def main(argv: list[str] | None = None) -> int:
 
         oplog(a.category.upper(), a.component, a.severity, a.message,
               json.loads(a.details) if a.details else None)
+    elif a.cmd == "site":
+        from .site import export
+
+        print(f"wrote {export(a.out)}")
     elif a.cmd == "report":
         from .pipeline import ops_report
 

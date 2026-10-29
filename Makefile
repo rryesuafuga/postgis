@@ -10,7 +10,7 @@ DEMO := EWS_DATA_DIR=data/synthetic PGDATABASE=ews_demo
 IMERG_LIKE := data/synthetic/raw/synthetic_imerg_like_daily.nc
 CAP_XSD_URL := https://docs.oasis-open.org/emergency/cap/v1.2/CAP-v1.2.xsd
 
-.PHONY: help up down init fetch load compute alert all app status integrity backup reingest \
+.PHONY: help up down init fetch load compute alert all app status integrity backup reingest site \
         report test cap-xsd demo demo-data demo-app
 
 help:
@@ -92,3 +92,7 @@ demo: demo-data
 
 demo-app:
 	$(DEMO) $(PY) -m streamlit run app/streamlit_app.py
+
+# Static page for GitHub Pages (Settings > Pages > branch main, folder /docs), from the demo database.
+site:
+	$(DEMO) $(PY) -m ews site

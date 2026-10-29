@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uganda Rainfall EWS</title>
+<meta name="description" content="PostGIS rainfall early-warning demo for Uganda's districts: 3-day totals against the 1991-2020 95th percentile, CAP 1.2 alerts, integrity checks and an operations log. Static export of the demo database.">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
+  --s1: #2a78d6; --s2: #eb6834; --bar: #9ec5f4; --band: rgba(42,120,214,.09);
+  --warning: #d03b3b; --watch: #fab219; --none: #ecebe6; --edge: #fcfcfb; --hl: #0b0b0b;
+  --good: #0ca30c; --caution: #fab219; --critical: #d03b3b;
+  --banner-bg: #fff6dc; --banner-ink: #5c4300; --banner-edge: #f3dc9b;
+  --link: #1c5cab; --code-bg: #f3f2ee;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
+    --s1: #3987e5; --s2: #d95926; --bar: #2b4d78; --band: rgba(57,135,229,.14);
+    --none: #2b2b29; --edge: #1a1a19; --hl: #f0efec;
+    --banner-bg: #2a220c; --banner-ink: #f3d78f; --banner-edge: #5a4512;
+    --link: #86b6ef; --code-bg: #232321;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
+  --s1: #3987e5; --s2: #d95926; --bar: #2b4d78; --band: rgba(57,135,229,.14);
+  --none: #2b2b29; --edge: #1a1a19; --hl: #f0efec;
+  --banner-bg: #2a220c; --banner-ink: #f3d78f; --banner-edge: #5a4512;
+  --link: #86b6ef; --code-bg: #232321;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+       font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--link); }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+header.wrap { padding-top: 28px; }
+.eyebrow { margin: 0 0 4px; color: var(--muted); font-size: 13px; letter-spacing: .02em; }
+h1 { margin: 0 0 6px; font-size: clamp(26px, 4vw, 36px); line-height: 1.15; }
+h2 { margin: 0 0 12px; font-size: 17px; }
+.lede { margin: 0 0 14px; color: var(--ink2); max-width: 78ch; }
+.banner { border: 1px solid var(--banner-edge); background: var(--banner-bg); color: var(--banner-ink);
+          border-radius: 10px; padding: 10px 14px; margin: 0 0 18px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+        margin-bottom: 16px; min-width: 0; }
+.controls { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: end; }
+.controls label.title { display: block; font-size: 13px; color: var(--ink2); margin-bottom: 4px; }
+.date-ctl { flex: 1 1 320px; }
+.date-ctl output { font-weight: 600; }
+input[type=range] { width: 100%; accent-color: var(--s1); }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label { padding: 6px 11px; font-size: 13px; cursor: pointer; border-right: 1px solid var(--border); }
+.seg label:last-child { border-right: 0; }
+.seg input:checked + span { font-weight: 650; }
+.seg label:has(input:checked) { background: var(--band); }
+.seg input:focus-visible + span { outline: 2px solid var(--s1); outline-offset: 2px; }
+.toggle { font-size: 13px; display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 16px 0; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.kpi .k { font-size: 12.5px; color: var(--ink2); }
+.kpi .v { font-size: 28px; font-weight: 600; line-height: 1.2; }
+.kpi .s { font-size: 12.5px; color: var(--muted); }
+.two { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; }
+@media (max-width: 1180px) { .two { grid-template-columns: minmax(0, 1fr); } }
+svg { display: block; width: 100%; height: auto; }
+#map path.d { stroke: var(--edge); stroke-width: .6; vector-effect: non-scaling-stroke; cursor: pointer; }
+#map path.d.flag { stroke: var(--hl); stroke-width: 1.4; }
+#map path.d.sel { stroke: var(--hl); stroke-width: 2.6; }
+#map path.d:hover { filter: brightness(.92); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--ink2); margin-top: 8px; }
+.sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--border);
+      vertical-align: -2px; margin-right: 5px; }
+.scroll { overflow: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { color: var(--ink2); font-weight: 600; white-space: nowrap; position: sticky; top: 0; background: var(--surface); }
+#flagged th, #flagged td { padding: 6px 6px; }
+td.t { white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background: var(--band); }
+.lvl { white-space: nowrap; }
+.pill { display: inline-block; padding: 0 7px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.pill.PASS { color: #fff; background: var(--good); }
+.pill.WARN { color: #0b0b0b; background: var(--caution); }
+.pill.FAIL { color: #fff; background: var(--critical); }
+.caption { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; }
+.chart-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+select { font: inherit; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border);
+         background: var(--surface); color: var(--ink); }
+details summary { cursor: pointer; color: var(--link); margin-top: 10px; }
+pre { background: var(--code-bg); border-radius: 8px; padding: 12px; overflow: auto; font-size: 12px; max-height: 420px; }
+.btn { display: inline-block; margin-top: 8px; font-size: 13px; padding: 5px 10px; border-radius: 8px;
+       border: 1px solid var(--border); color: var(--ink); text-decoration: none; }
+#tip { position: fixed; z-index: 10; pointer-events: none; display: none; max-width: 300px;
+       background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 10px;
+       padding: 8px 10px; font-size: 12.5px; box-shadow: 0 6px 22px rgba(0,0,0,.16); }
+#tip b { font-size: 13.5px; }
+#tip .m { color: var(--ink2); }
+.about li { margin-bottom: 4px; }
+code { font-size: 12.5px; }
+footer { color: var(--muted); font-size: 12.5px; padding: 8px 0 40px; }
+.axis text { fill: var(--muted); font-size: 11px; }
+.gridline { stroke: var(--grid); }
+</style>
+</head>
+<body>
+<header class="wrap">
+  <p class="eyebrow" id="eyebrow"></p>
+  <h1>Uganda rainfall early warning</h1>
+  <p class="lede">District 3-day rainfall against the 1991&ndash;2020 95th percentile for the time of year and
+    fixed triggers, computed in PostgreSQL/PostGIS, with CAP&nbsp;1.2 alerts, integrity checks, verified backups
+    and an operations log. <a id="repo" href="#">Source code, SQL and README</a>.</p>
+  <div class="banner" id="banner" hidden></div>
+</header>
+
+<main class="wrap">
+  <section class="card controls" aria-label="Controls">
+    <div class="date-ctl">
+      <label class="title" for="date">3-day window ending <output id="dateOut"></output></label>
+      <input type="range" id="date" min="0" step="1">
+    </div>
+    <div>
+      <span class="title" style="display:block;font-size:13px;color:var(--ink2);margin-bottom:4px">Colour districts by</span>
+      <div class="seg" role="radiogroup" id="metric"></div>
+    </div>
+    <label class="toggle"><input type="checkbox" id="gridToggle"> Rainfall grid (rendered in PostGIS)</label>
+  </section>
+
+  <section class="kpis" id="kpis" aria-label="Summary"></section>
+
+  <section class="two">
+    <figure class="card" style="margin:0 0 16px">
+      <svg id="map" role="img" aria-label="Map of Uganda's districts coloured by the selected measure">
+        <defs><clipPath id="ug"><path id="ugPath"></path></clipPath></defs>
+        <image id="rgrid" clip-path="url(#ug)" preserveAspectRatio="none" style="image-rendering:pixelated" visibility="hidden"></image>
+        <g id="districts"></g>
+      </svg>
+      <div class="legend" id="legend"></div>
+      <p class="caption">Hover a district for its numbers; click one to chart it. The grid is CHIRPS-style
+        0.05&deg; cells (about 5.5&nbsp;km).</p>
+    </figure>
+    <div class="card">
+      <h2>Flagged districts</h2>
+      <div class="scroll" style="max-height:520px"><table id="flagged"></table></div>
+      <p class="caption" id="rulesNote"></p>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="chart-head">
+      <h2 style="margin:0">District time series</h2>
+      <label style="font-size:13px;color:var(--ink2)">District <select id="districtSel"></select></label>
+    </div>
+    <div class="legend" id="chartLegend" style="margin:6px 0 2px"></div>
+    <svg id="chart" viewBox="0 0 900 270" role="img" aria-label="Daily and 3-day rainfall for the selected district"></svg>
+    <p class="caption" id="chartNote"></p>
+  </section>
+
+  <section class="card">
+    <h2>CAP 1.2 messages</h2>
+    <div class="scroll"><table id="cap"></table></div>
+    <details id="capXmlBox"><summary>Show the CAP XML</summary><pre><code id="capXml"></code></pre></details>
+    <a class="btn" id="capDl" download="cap-alert.xml">Download CAP XML</a>
+  </section>
+
+  <section class="card">
+    <h2>Integrity checks</h2>
+    <div class="scroll" style="max-height:520px"><table id="integrity"></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Operations log <span style="font-weight:400;color:var(--muted);font-size:13px">(latest 40 entries, East Africa Time)</span></h2>
+    <div class="scroll" style="max-height:380px"><table id="oplog"></table></div>
+  </section>
+
+  <section class="card about">
+    <h2>How this page was made</h2>
+    <ul id="about"></ul>
+  </section>
+</main>
+
+<footer class="wrap" id="footer"></footer>
+<div id="tip" role="tooltip"></div>
+
+<script id="data" type="application/json">/*__DATA__*/{}</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("data").textContent);
+const $ = (id) => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const fmtDate = (iso, year = true) => { const [y, m, d] = iso.split("-").map(Number);
+  return `${d} ${MONTHS[m - 1]}${year ? " " + y : ""}`; };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const isDark = () => { const t = document.documentElement.dataset.theme;
+  return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
+
+const LEVELS = [
+  { key: "none", label: "No trigger", icon: "·", color: () => css("--none") },
+  { key: "watch", label: "Watch", icon: "▲", color: () => css("--watch") },
+  { key: "warning", label: "Warning", icon: "■", color: () => css("--warning") },
+];
+const BLUES = { light: ["#cde2fb","#9ec5f4","#6da7ec","#3987e5","#256abf","#184f95","#0d366b"],
+                dark:  ["#104281","#184f95","#1c5cab","#2a78d6","#5598e7","#86b6ef","#b7d3f6"] };
+const DIVERGING = { light: ["#256abf","#6da7ec","#b7d3f6","#e1e0d9","#f2b8b5","#e66767","#b52a2a"],
+                    dark:  ["#86b6ef","#3987e5","#1c5cab","#383835","#8f2f2f","#d95050","#f2b8b5"] };
+const METRICS = [
+  { key: "level", label: "Alert level" },
+  { key: "mean", label: "3-day rainfall", bins: [10, 25, 40, 60, 80, 120], unit: " mm", ramp: "seq" },
+  { key: "ratio", label: "Ratio to P95", bins: [0.5, 0.75, 0.9, 1.1, 1.5, 2], unit: "×", ramp: "div" },
+  { key: "pct", label: "% area above P95", bins: [5, 15, 30, 50, 70, 90], unit: "%", ramp: "seq" },
+];
+const RULES = Object.fromEntries(D.rules.map((r) => [r.rule_code, r.description]));
+
+const state = { date: 0, metric: "level", grid: false, district: 0 };
+
+// ---------------------------------------------------------------- defaults
+(function defaults() {
+  const capDates = D.cap.filter((c) => c.status !== "Draft" && c.end_date).map((c) => c.end_date);
+  let di = capDates.length ? D.dates.indexOf(capDates[0]) : -1;
+  if (di < 0) {
+    let best = -1;
+    D.dates.forEach((d, i) => { const s = D.exc[d].reduce((a, r) => a + (r ? r[5] : 0), 0); if (s > best) { best = s; di = i; } });
+  }
+  state.date = Math.max(di, 0);
+  const capDistrict = D.cap.length ? D.districts.findIndex((d) => d.name === D.cap[0].district) : -1;
+  state.district = capDistrict >= 0 ? capDistrict : topFlagged(D.dates[state.date])[0] ?? 0;
+})();
+
+function topFlagged(date) {
+  return D.exc[date].map((r, i) => [r, i]).filter(([r]) => r && r[5] > 0)
+    .sort((a, b) => b[0][5] - a[0][5] || b[0][3] - a[0][3]).map(([, i]) => i);
+}
+function binned(v, bins, colours) {
+  if (v == null) return css("--none");
+  for (let i = 0; i < bins.length; i++) if (v < bins[i]) return colours[i];
+  return colours[bins.length];
+}
+function fillFor(r) {
+  if (!r) return css("--none");
+  const m = METRICS.find((x) => x.key === state.metric);
+  if (m.key === "level") return LEVELS[r[5]].color();
+  const ramp = (m.ramp === "div" ? DIVERGING : BLUES)[isDark() ? "dark" : "light"];
+  const v = m.key === "mean" ? r[0] : m.key === "ratio" ? r[3] : 100 * r[4];
+  return binned(v, m.bins, ramp);
+}
+
+// ---------------------------------------------------------------- static parts
+$("repo").href = D.meta.repo;
+$("eyebrow").textContent = `PostGIS demo · static export of the demo database, ${D.meta.exported}`;
+if (D.meta.synthetic_rain) {
+  const b = $("banner"); b.hidden = false;
+  b.innerHTML = "<b>Synthetic rainfall.</b> The district boundaries are real (geoBoundaries, " +
+    `${D.districts.length} districts), but the rainfall is generated to exercise the pipeline, with storms ` +
+    "placed over Mt Elgon and the Rwenzori. Alerts are CAP status <code>Test</code>. Do not read it as " +
+    "conditions in Uganda.";
+}
+
+const map = $("map");
+map.setAttribute("viewBox", `0 0 ${D.view.w} ${D.view.h}`);
+$("ugPath").setAttribute("d", D.districts.map((d) => d.path).join(""));
+const [gx, gy, gw, gh] = D.grid_box;
+const img = $("rgrid");
+Object.entries({ x: gx, y: gy, width: gw, height: gh }).forEach(([k, v]) => img.setAttribute(k, v));
+const gDistricts = $("districts");
+const paths = D.districts.map((d, i) => {
+  const p = document.createElementNS(NS, "path");
+  p.setAttribute("d", d.path); p.setAttribute("class", "d"); p.dataset.i = i;
+  p.addEventListener("pointermove", (e) => showTip(e, districtTip(i)));
+  p.addEventListener("pointerleave", hideTip);
+  p.addEventListener("click", () => { state.district = i; render(); });
+  gDistricts.appendChild(p);
+  return p;
+});
+
+const metricBox = $("metric");
+METRICS.forEach((m) => {
+  const l = document.createElement("label");
+  l.innerHTML = `<input type="radio" name="metric" value="${m.key}"${m.key === state.metric ? " checked" : ""}><span>${m.label}</span>`;
+  l.querySelector("input").addEventListener("change", () => { state.metric = m.key; render(); });
+  metricBox.appendChild(l);
+});
+const slider = $("date");
+slider.max = D.dates.length - 1; slider.value = state.date;
+slider.addEventListener("input", () => { state.date = +slider.value; render(); });
+$("gridToggle").addEventListener("change", (e) => { state.grid = e.target.checked; render(); });
+
+const sel = $("districtSel");
+D.districts.forEach((d, i) => { const o = document.createElement("option"); o.value = i; o.textContent = d.name; sel.appendChild(o); });
+sel.addEventListener("change", () => { state.district = +sel.value; render(); });
+
+$("rulesNote").innerHTML = "Hover a row for the triggers it met. Triggers (demonstration thresholds): " +
+  D.rules.map((r) => `<b>${esc(r.rule_code)}</b> ${esc(r.description)} (${esc(r.level)})`).join("; ") +
+  ". Warning authority rests with the designated national approving authority.";
+
+// ---------------------------------------------------------------- tooltip
+const tip = $("tip");
+function showTip(e, html) {
+  tip.innerHTML = html; tip.style.display = "block";
+  const pad = 14, r = tip.getBoundingClientRect();
+  let x = e.clientX + pad, y = e.clientY + pad;
+  if (x + r.width > innerWidth - 8) x = e.clientX - r.width - pad;
+  if (y + r.height > innerHeight - 8) y = e.clientY - r.height - pad;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+function levelHtml(code, icon = true) {
+  const L = LEVELS[code];
+  return `<span class="lvl"><span class="sw" style="background:${L.color()}"></span>${icon ? L.icon + " " : ""}${L.label}</span>`;
+}
+function districtTip(i) {
+  const d = D.districts[i], r = D.exc[D.dates[state.date]][i];
+  if (!r) return `<b>${esc(d.name)}</b><div class="m">no data</div>`;
+  return `<b>${esc(d.name)}</b> <span class="m">${d.km2.toLocaleString()} km²</span><br>${levelHtml(r[5])}<br>` +
+    `3-day mean <b>${r[0].toFixed(0)} mm</b> · P95 ${r[2].toFixed(0)} mm · ${r[3].toFixed(2)}×<br>` +
+    `<span class="m">wettest cell ${r[1].toFixed(0)} mm · ${(100 * r[4]).toFixed(0)}% of district above its P95</span>` +
+    (r[6] ? `<br><span class="m">${esc(r[6].split(" ").join(", "))}</span>` : "");
+}
+
+// ---------------------------------------------------------------- render
+function render() {
+  const date = D.dates[state.date], rows = D.exc[date];
+  const [yy, mo, dd] = date.split("-").map(Number);
+  const start = new Date(Date.UTC(yy, mo - 1, dd - 2)).toISOString().slice(0, 10);
+  $("dateOut").textContent = `${fmtDate(date)} (${fmtDate(start, false)}–${fmtDate(date, false)})`;
+  slider.setAttribute("aria-valuetext", fmtDate(date));
+
+  // map
+  const flagged = new Set(topFlagged(date));
+  paths.forEach((p, i) => {
+    p.setAttribute("fill", fillFor(rows[i]));
+    p.setAttribute("fill-opacity", state.grid ? (state.metric === "level" && flagged.has(i) ? .55 : .18) : 1);
+    p.classList.toggle("flag", flagged.has(i));
+    p.classList.toggle("sel", i === state.district);
+  });
+  const png = D.rasters[date];
+  img.setAttribute("visibility", state.grid && png ? "visible" : "hidden");
+  if (png) img.setAttribute("href", png);
+  const top = paths[state.district]; top.parentNode.appendChild(top);   // selected outline on top
+
+  // legend
+  const m = METRICS.find((x) => x.key === state.metric);
+  let items;
+  if (m.key === "level") items = LEVELS.slice().reverse().map((L) => [L.color(), `${L.icon} ${L.label}`]);
+  else {
+    const ramp = (m.ramp === "div" ? DIVERGING : BLUES)[isDark() ? "dark" : "light"];
+    const e = [`< ${m.bins[0]}`, ...m.bins.slice(1).map((b, i) => `${m.bins[i]}–${b}`), `≥ ${m.bins.at(-1)}`];
+    items = ramp.map((c, i) => [c, e[i] + m.unit]);
+  }
+  $("legend").innerHTML = items.map(([c, l]) => `<span><span class="sw" style="background:${c}"></span>${l}</span>`).join("");
+
+  // KPIs
+  const count = (code) => rows.filter((r) => r && r[5] === code).length;
+  let wi = 0; rows.forEach((r, i) => { if (r && r[0] > (rows[wi]?.[0] ?? -1)) wi = i; });
+  const capN = D.cap.filter((c) => c.end_date === date && c.status !== "Draft").length;
+  const kpis = [
+    ["■ Warning", count(2), "districts at warning level"],
+    ["▲ Watch", count(1), "districts at watch level"],
+    ["Wettest district, 3-day mean", `${rows[wi][0].toFixed(0)} mm`, D.districts[wi].name],
+    ["CAP messages, this window", capN, `${D.cap.length} stored in total`],
+    ["Last verified backup (EAT)", D.meta.last_backup ?? "never", "pg_dump, restored and checked"],
+  ];
+  $("kpis").innerHTML = kpis.map(([k, v, s]) =>
+    `<div class="kpi"><div class="k">${k}</div><div class="v">${esc(v)}</div><div class="s">${esc(s)}</div></div>`).join("");
+
+  // flagged table
+  const fl = topFlagged(date);
+  $("flagged").innerHTML = fl.length
+    ? "<thead><tr><th>Level</th><th>District</th><th class='n'>3-day mean</th><th class='n'>P95</th>" +
+      "<th class='n'>× P95</th><th class='n'>% &gt; P95</th></tr></thead><tbody>" +
+      fl.map((i) => { const r = rows[i];
+        const why = r[6].split(" ").map((c) => `${c}: ${RULES[c] ?? ""}`).join("\n");
+        return `<tr class="clickable" data-i="${i}" title="${esc(why)}"><td>${levelHtml(r[5], false)}</td><td>${esc(D.districts[i].name)}</td>` +
+          `<td class="n">${r[0].toFixed(0)} mm</td><td class="n">${r[2].toFixed(0)} mm</td><td class="n">${r[3].toFixed(2)}</td>` +
+          `<td class="n">${(100 * r[4]).toFixed(0)}%</td></tr>`; }).join("") +
+      "</tbody>"
+    : "<tbody><tr><td>No district meets a trigger for this window.</td></tr></tbody>";
+  $("flagged").querySelectorAll("tr[data-i]").forEach((tr) =>
+    tr.addEventListener("click", () => { state.district = +tr.dataset.i; render(); }));
+
+  sel.value = state.district;
+  drawChart();
+}
+
+// ---------------------------------------------------------------- chart
+function drawChart() {
+  const svg = $("chart"); svg.innerHTML = "";
+  const W = 900, H = 270, L = 46, R = 70, T = 14, B = 30;
+  const i = state.district, days = D.days, n = days.length;
+  const daily = D.daily.chirps[i], aux = D.daily.aux[i];
+  const totals = D.dates.map((d) => D.exc[d][i]?.[0] ?? null);
+  const p95 = D.exc[D.dates[state.date]][i]?.[2];
+  const all = [...daily, ...aux, ...totals, p95].filter((v) => v != null);
+  const step = (v) => { const raw = v / 4, mag = 10 ** Math.floor(Math.log10(raw || 1));
+    return [1, 2, 2.5, 5, 10].map((k) => k * mag).find((s) => s >= raw); };
+  const st = step(Math.max(...all, 10) * 1.08), ymax = Math.ceil(Math.max(...all, 10) * 1.08 / st) * st;
+  const bw = (W - L - R) / n;
+  const X = (k) => L + bw * (k + .5), Y = (v) => T + (H - T - B) * (1 - v / ymax);
+  const el = (tag, attrs, parent = svg) => { const e = document.createElementNS(NS, tag);
+    Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); parent.appendChild(e); return e; };
+
+  // window band for the selected 3-day window
+  const endK = days.indexOf(D.dates[state.date]);
+  if (endK >= 0) el("rect", { x: L + bw * (endK - 2), y: T, width: bw * 3, height: H - T - B, fill: css("--band") });
+  // grid + axis
+  const ax = el("g", { class: "axis" });
+  for (let v = 0; v <= ymax + 1e-9; v += st) {
+    el("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v), class: "gridline", "stroke-width": 1 }, ax);
+    el("text", { x: L - 8, y: Y(v) + 4, "text-anchor": "end" }, ax).textContent = v;
+  }
+  el("text", { x: L, y: T - 4 }, ax).textContent = "mm";
+  days.forEach((d, k) => { if (k % 2 === 0 || n <= 12) el("text", { x: X(k), y: H - 9, "text-anchor": "middle" }, ax).textContent = fmtDate(d, false); });
+  el("line", { x1: L, x2: W - R, y1: Y(0), y2: Y(0), stroke: css("--axis"), "stroke-width": 1 });
+  // bars: daily district mean
+  daily.forEach((v, k) => { if (v == null) return;
+    const h = Math.max(Y(0) - Y(v), 0);
+    el("rect", { x: X(k) - bw * .3, y: Y(v), width: bw * .6, height: h, rx: Math.min(3, h / 2), fill: css("--bar") }); });
+  // P95 reference
+  if (p95 != null) {
+    el("line", { x1: L, x2: W - R, y1: Y(p95), y2: Y(p95), stroke: css("--muted"), "stroke-width": 1.5, "stroke-dasharray": "6 5" });
+    el("text", { x: W - R + 6, y: Y(p95) + 4, fill: css("--ink2"), "font-size": 11 }).textContent = `P95 ${p95.toFixed(0)}`;
+  }
+  // aux daily line
+  const line = (vals, colour, width) => {
+    const pts = vals.map((v, k) => (v == null ? null : `${X(k).toFixed(1)},${Y(v).toFixed(1)}`)).filter(Boolean);
+    if (pts.length > 1) el("polyline", { points: pts.join(" "), fill: "none", stroke: colour, "stroke-width": width,
+                                           "stroke-linejoin": "round", "stroke-linecap": "round" });
+  };
+  if (aux.some((v) => v != null)) line(aux, css("--s2"), 1.6);
+  // 3-day totals on the day axis
+  const totK = D.dates.map((d) => days.indexOf(d));
+  const tvals = days.map((d, k) => { const j = totK.indexOf(k); return j >= 0 ? totals[j] : null; });
+  line(tvals, css("--s1"), 2.2);
+  tvals.forEach((v, k) => { if (v != null) el("circle", { cx: X(k), cy: Y(v), r: 3.2, fill: css("--s1"), stroke: css("--surface"), "stroke-width": 1.5 }); });
+  const last = tvals.findLastIndex((v) => v != null);
+  if (last >= 0) el("text", { x: W - R + 6, y: Y(tvals[last]) + 4, fill: css("--ink2"), "font-size": 11 }).textContent = "3-day";
+
+  // hover layer: crosshair + tooltip per day
+  const cross = el("line", { y1: T, y2: H - B, stroke: css("--muted"), "stroke-width": 1, visibility: "hidden" });
+  days.forEach((d, k) => {
+    const hit = el("rect", { x: L + bw * k, y: T, width: bw, height: H - T - B, fill: "transparent" });
+    hit.addEventListener("pointermove", (e) => {
+      cross.setAttribute("x1", X(k)); cross.setAttribute("x2", X(k)); cross.setAttribute("visibility", "visible");
+      const parts = [`<b>${fmtDate(d)}</b>`, `daily mean ${daily[k] == null ? "–" : daily[k].toFixed(1) + " mm"}`];
+      if (tvals[k] != null) parts.push(`3-day total <b>${tvals[k].toFixed(0)} mm</b>`);
+      if (aux[k] != null) parts.push(`<span class="m">cross-check ${aux[k].toFixed(1)} mm</span>`);
+      showTip(e, parts.join("<br>"));
+    });
+    hit.addEventListener("pointerleave", () => { cross.setAttribute("visibility", "hidden"); hideTip(); });
+  });
+
+  const auxLabel = D.meta.aux_name ? `${D.meta.aux_name.replace(/_/g, " ")} daily mean (cross-check)` : null;
+  $("chartLegend").innerHTML = [
+    [`background:${css("--bar")}`, "Daily district mean"],
+    [`background:${css("--s1")}`, "3-day total"],
+    [`border:2px dashed ${css("--muted")};background:none`, "1991–2020 P95 of 3-day totals"],
+    ...(auxLabel ? [[`background:${css("--s2")}`, auxLabel]] : []),
+  ].map(([s, l]) => `<span><span class="sw" style="${s}"></span>${l}</span>`).join("");
+  $("chartNote").textContent = `${D.districts[i].name}: rainfall ${D.meta.synthetic_rain ? "(synthetic) " : ""}` +
+    `for ${fmtDate(days[0], false)}–${fmtDate(days.at(-1))}. The shaded band is the selected 3-day window.`;
+}
+
+// ---------------------------------------------------------------- tables that do not change
+(function tables() {
+  $("cap").innerHTML = D.cap.length
+    ? "<thead><tr><th>Sent (EAT)</th><th>Type</th><th>Status</th><th>District</th><th>Window end</th>" +
+      "<th>Severity</th><th>Urgency</th><th>Certainty</th></tr></thead><tbody>" +
+      D.cap.map((c) => `<tr><td class="t">${esc(c.sent)}</td><td>${esc(c.msg_type)}</td><td>${esc(c.status)}</td>` +
+        `<td>${esc(c.district)}</td><td class="t">${c.end_date ? fmtDate(c.end_date) : ""}</td><td>${esc(c.severity)}</td>` +
+        `<td>${esc(c.urgency)}</td><td>${esc(c.certainty)}</td></tr>`).join("") + "</tbody>"
+    : "<tbody><tr><td>No CAP messages.</td></tr></tbody>";
+  if (D.cap.length) {
+    const xml = D.cap[0].xml;
+    $("capXml").textContent = xml;
+    $("capDl").href = URL.createObjectURL(new Blob([xml], { type: "application/xml" }));
+    $("capDl").download = `${D.cap[0].identifier}.xml`;
+  } else { $("capXmlBox").hidden = true; $("capDl").hidden = true; }
+
+  const icon = { PASS: "✓", WARN: "!", FAIL: "✗" };
+  $("integrity").innerHTML = "<thead><tr><th>Status</th><th>Check</th><th>Detail</th></tr></thead><tbody>" +
+    D.integrity.map((r) => `<tr><td><span class="pill ${r.status}">${icon[r.status]} ${r.status}</span></td>` +
+      `<td><code>${esc(r.check_name)}</code></td><td>${esc(r.detail)}</td></tr>`).join("") + "</tbody>";
+
+  $("oplog").innerHTML = "<thead><tr><th>Logged</th><th>Category</th><th>Severity</th><th>Component</th><th>Message</th></tr></thead><tbody>" +
+    D.oplog.map((r) => `<tr><td class="t">${esc(r.t)}</td><td>${esc(r.category)}</td><td>${esc(r.severity)}</td>` +
+      `<td>${esc(r.component)}</td><td>${esc(r.message)}</td></tr>`).join("") + "</tbody>";
+
+  const repo = D.meta.repo, f = (p) => `<a href="${repo}/blob/main/${p}"><code>${p}</code></a>`;
+  $("about").innerHTML = [
+    `Exported from the demo database (PostgreSQL ${esc(D.meta.postgres)}, PostGIS ${esc(D.meta.postgis)}) on ${esc(D.meta.exported)} with <code>make site</code>: every number, outline and rainfall image on this page was read from PostGIS. No server runs behind it.`,
+    `Districts: ${esc(D.meta.district_source)}, loaded with <code>ogr2ogr</code> and indexed with GiST (${f("scripts/10_load_districts.sh")}); water bodies excluded and two source spellings corrected on load (${f("sql/10_districts.sql")}).`,
+    `Rainfall: ${D.meta.raster_tiles} raster tiles loaded with <code>raster2pgsql -t 100x100 -I -C</code> (${f("scripts/20_load_rasters.sh")}). District mean and max come from <code>ST_Clip</code> + <code>ST_SummaryStatsAgg</code>; 3-day totals are built in the database with <code>ST_Union(…, 'SUM')</code> (${f("sql/20_analysis.sql")}).`,
+    `The rainfall grid is mosaicked, clipped, colour-mapped and PNG-encoded inside PostGIS (<code>ST_Union</code> → <code>ST_Clip</code> → <code>ST_ColorMap</code> → <code>ST_AsPNG</code>).`,
+    `Climatology: <code>${esc(D.meta.climatology)}</code>, the per-cell 95th percentile of 1991–2020 3-day totals for ±15 days around the event window, built with xarray.`,
+    `CAP 1.2 messages are validated before they are stored; integrity checks come from <code>ops.integrity_checks()</code> (${f("sql/90_integrity.sql")}); backups are restored into a scratch database and checked (${f("scripts/backup.sh")}).`,
+    `The live Streamlit version runs with <code>docker compose</code> or in GitHub Codespaces: see the <a href="${repo}#quick-start">README</a>.`,
+  ].map((t) => `<li>${t}</li>`).join("");
+
+  $("footer").innerHTML = "District boundaries: geoBoundaries gbOpen UGA ADM3 (CC0), Runfola et al. 2020. " +
+    (D.meta.synthetic_rain ? "Rainfall on this page is synthetic test data, not CHIRPS. " : "Rainfall: CHIRPS v2.0, UCSB Climate Hazards Center. ") +
+    "Demonstration only: not an official warning. Warning authority rests with the designated national approving authority.";
+})();
+
+render();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+</script>
+</body>
+</html>

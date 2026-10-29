@@ -9,6 +9,8 @@ It ends with a one-page runbook for backup, integrity checks and re-ingest.
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/rryesuafuga/postgis?quickstart=1)
 Run it in the browser with nothing installed: see [Quick start](#in-the-browser-github-codespaces).
+Or just look: **[static demo page](https://rryesuafuga.github.io/postgis/)**, exported from the demo
+database (no server; see [Static page](#static-page-github-pages)).
 
 ```
 CHIRPS v2.0 daily GeoTIFF ─┐            ┌─ ref.district (GiST) ───────────┐
@@ -65,6 +67,7 @@ because the build environment could not reach the tile server; the PostGIS layer
 | `ews/` | Python: downloads, xarray climatology, orchestration, CAP builder and validator |
 | `ews/fixtures/` | geoBoundaries Uganda district layer (CC0, simplified) used by the offline demo |
 | `app/streamlit_app.py` | **step 7**: map, flagged districts, time series, CAP messages, ops log |
+| `ews/site.py`, `docs/index.html` | the static page for GitHub Pages, exported from the demo database (`make site`) |
 | `tests/` | CAP, climatology and downloader tests (downloaders run against local fakes of the real formats) |
 
 ## Quick start
@@ -100,6 +103,22 @@ Notes:
   app (Ctrl+C in the **app** terminal, then `bash .devcontainer/start-app.sh`).
 * Personal GitHub accounts include a free monthly Codespaces allowance (about 60 hours on the
   standard 2-core machine).
+
+### Static page: GitHub Pages
+
+`docs/index.html` is one self-contained page exported from the demo database by `make site`:
+district outlines, the exceedance results for every 3-day window, daily district means, the
+rainfall grid of each window (rendered inside PostGIS with `ST_ColorMap` and `ST_AsPNG`), the CAP
+messages, integrity checks and operations log. It needs no server and loads nothing from
+elsewhere, so the link keeps working with no codespace running. It is a snapshot: nothing is
+computed in the browser, and it shows the synthetic demo, never real data.
+
+One-time setup on GitHub: **Settings**, **Pages**, under *Build and deployment* set **Source** to
+**Deploy from a branch**, **Branch** to `main` and the folder to `/docs`, then **Save**. After a
+minute or two the page is at <https://rryesuafuga.github.io/postgis/>.
+
+To refresh it after a change: `make demo site` (or `git pull && make demo site` in a codespace),
+then commit `docs/index.html`.
 
 ### A. Offline demo (real districts, synthetic rainfall, about 20 s)
 
@@ -341,7 +360,11 @@ python -m ews log ESCALATION chirps-feed WARN "Escalated to ICPAC" --details '{"
   copy of the repository. The `tools` image was built from `docker/tools.Dockerfile` separately
   (this sandbox needs a proxy for pip), then `devcontainer up` ran `make demo` in the workspace
   container against the `db` service, and `start-app.sh` served the app on 8501, including
-  rebuilding a missing demo database. Not yet opened in GitHub Codespaces itself.
+  rebuilding a missing demo database. Then opened in GitHub Codespaces itself: the app came up on
+  the forwarded port 8501 (after the 401 fix above).
+* The static page in Chromium (Playwright): no script errors and no requests outside the page,
+  light and dark themes, no sideways scrolling at 390 px, and map and chart tooltips matching the
+  database (Bududa, window ending 31 Jul 2022: 3-day mean 153 mm, P95 44 mm, 3.45×).
 * **Not yet run against the live CHC, ERDDAP, HDX and GADM servers.** The build environment could not
   reach them. URL patterns and formats follow the providers' published conventions. Check the first
   real `make fetch` and report any 404 with `python -m ews log FAULT ...`.
