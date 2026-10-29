@@ -2,7 +2,7 @@
 # Step 1: load district boundaries with ogr2ogr, normalise them, and build the GiST index.
 #
 # The boundary source is described by $DATA_DIR/boundaries/district_source.env, written by
-# `python -m ews fetch-districts` (HDX COD-AB or GADM) or `python -m ews synthetic`.
+# `python -m ews fetch-districts` (geoBoundaries, HDX COD-AB or GADM) or `python -m ews synthetic`.
 source "$(dirname "$0")/lib.sh"
 require ogr2ogr psql
 
@@ -10,6 +10,8 @@ SRC_ENV="$DATA_DIR/boundaries/district_source.env"
 [[ -f "$SRC_ENV" ]] || die "$SRC_ENV not found: run 'python -m ews fetch-districts' (or 'make demo-data')"
 # shellcheck disable=SC1090
 source "$SRC_ENV"
+# Repository-relative paths (e.g. the vendored demo layer) resolve against the repo root.
+[[ "$EWS_DISTRICT_SRC" = /* ]] || EWS_DISTRICT_SRC="$ROOT/$EWS_DISTRICT_SRC"
 
 log "ogr2ogr: $EWS_DISTRICT_SRC ${EWS_DISTRICT_LAYER:-} -> ref.district_src"
 # Staging load. The spatial index is created explicitly on the normalised table below.

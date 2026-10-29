@@ -86,7 +86,8 @@ demo: demo-data
 	$(DEMO) bash scripts/20_load_rasters.sh
 	$(DEMO) $(PY) -m ews compute
 	$(DEMO) bash scripts/21_load_aux.sh imerg_like
-	$(DEMO) $(PY) -m ews alert
+	$(DEMO) $(PY) -m ews alert --update-if-active
+	$(DEMO) bash scripts/backup.sh
 	$(DEMO) $(PY) -m ews integrity
 
 demo-app:

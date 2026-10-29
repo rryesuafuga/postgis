@@ -23,8 +23,9 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("synthetic", help="generate the offline SYNTHETIC test fixture")
     s.add_argument("--seed", type=int, default=20220730)
 
-    s = sub.add_parser("fetch-districts", help="download district boundaries (HDX COD-AB or GADM)")
-    s.add_argument("--source", choices=["hdx", "gadm"], default=config.env("EWS_DISTRICT_SOURCE", "hdx"))
+    s = sub.add_parser("fetch-districts", help="download district boundaries (geoBoundaries, HDX COD-AB or GADM)")
+    s.add_argument("--source", choices=["geoboundaries", "hdx", "gadm"],
+                   default=config.env("EWS_DISTRICT_SOURCE", "geoboundaries"))
 
     s = sub.add_parser("fetch-chirps", help="download daily CHIRPS for the event window (+2 lead days)")
     s.add_argument("--start", type=_d, default=ev_start - timedelta(days=2))
@@ -57,13 +58,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--name", required=True)
 
     s = sub.add_parser("alert", help="export a CAP 1.2 message for a flagged district")
-    s.add_argument("--district", help="pcode; default = highest-ranked flagged district")
+    s.add_argument("--district", help="district name or code; default = highest-ranked flagged district")
     s.add_argument("--date", type=_d, help="3-day window end date; default = latest flagged")
     s.add_argument("--msg-type", choices=["Alert", "Update", "Cancel"], default="Alert")
     s.add_argument("--status", choices=["Exercise", "Test", "Draft", "Actual"], default="Exercise")
     s.add_argument("--approved-by")
     s.add_argument("--expires-hours", type=int, default=48)
     s.add_argument("--force", action="store_true")
+    s.add_argument("--update-if-active", action="store_true",
+                   help="issue an Update instead of a second Alert when the district already has one")
 
     s = sub.add_parser("validate-cap", help="validate CAP XML files")
     s.add_argument("files", nargs="+", type=Path)
@@ -94,7 +97,8 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "fetch-districts":
         from . import fetch
 
-        fn = fetch.fetch_districts_hdx if a.source == "hdx" else fetch.fetch_districts_gadm
+        fn = {"geoboundaries": fetch.fetch_districts_geoboundaries, "hdx": fetch.fetch_districts_hdx,
+              "gadm": fetch.fetch_districts_gadm}[a.source]
         print(f"wrote {fn(data / 'boundaries')}")
     elif a.cmd == "fetch-chirps":
         from . import fetch
@@ -136,7 +140,8 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "alert":
         from .pipeline import issue_alert
 
-        path = issue_alert(a.district, a.date, a.msg_type, a.status, a.approved_by, a.force, a.expires_hours)
+        path = issue_alert(a.district, a.date, a.msg_type, a.status, a.approved_by, a.force, a.expires_hours,
+                           a.update_if_active)
         from .cap import as_json
 
         print(f"wrote {path}\n{as_json(path.read_bytes())}")

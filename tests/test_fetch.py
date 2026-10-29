@@ -1,6 +1,7 @@
 """Downloaders exercised against local fakes shaped like the real products (no network)."""
 
 import gzip
+import json
 import shlex
 import shutil
 import zipfile
@@ -130,19 +131,68 @@ def test_hdx_cod_ab_admin2_shapefile_in_zip(tmp_path, monkeypatch):
     assert pyogrio.read_info(env["EWS_DISTRICT_SRC"], layer=env["EWS_DISTRICT_LAYER"])["features"] == 2
 
 
-def test_gadm_district_layer_chosen_by_count(tmp_path, monkeypatch):
+DISTRICT_NAMES = ["Bududa", "Mbale", "Kasese", "Gulu", "Kapchorwa", "Kampala"]
+
+
+def test_gadm_district_layer_chosen_by_names_not_just_count(tmp_path, monkeypatch):
+    # Districts (135) and counties (151) are both in the 100-200 range: names decide.
     gpkg = tmp_path / "gadm41_UGA.gpkg"
-    for layer, n in (("ADM_ADM_0", 1), ("ADM_ADM_1", 135), ("ADM_ADM_2", 400)):
-        g = gpd.GeoDataFrame({f"GID_{layer[-1]}": [f"UGA.{i}" for i in range(n)],
-                              f"NAME_{layer[-1]}": [f"n{i}" for i in range(n)]},
+    layers = (("ADM_ADM_0", 1, ["Uganda"]),
+              ("ADM_ADM_1", 151, ["Aringa", "Aswa", "Dodoth", "Kampala"]),      # county-like
+              ("ADM_ADM_2", 135, DISTRICT_NAMES))
+    for layer, n, names in layers:
+        lvl = layer[-1]
+        g = gpd.GeoDataFrame({f"GID_{lvl}": [f"UGA.{i}" for i in range(n)],
+                              f"NAME_{lvl}": [names[i] if i < len(names) else f"n{i}" for i in range(n)]},
                              geometry=[box(30 + i * 0.001, 0, 30 + i * 0.001 + 0.0005, 0.0005) for i in range(n)],
                              crs="EPSG:4326")
         g.to_file(gpkg, layer=layer, driver="GPKG")
     monkeypatch.setattr(fetch, "download", serve(gpkg))
     env = read_env(fetch.fetch_districts_gadm(tmp_path / "boundaries"))
-    assert env["EWS_DISTRICT_LAYER"] == "ADM_ADM_1"
-    assert env["EWS_DISTRICT_NAME_FIELD"] == "name_1" and env["EWS_DISTRICT_CODE_FIELD"] == "gid_1"
+    assert env["EWS_DISTRICT_LAYER"] == "ADM_ADM_2"
+    assert env["EWS_DISTRICT_NAME_FIELD"] == "name_2" and env["EWS_DISTRICT_CODE_FIELD"] == "gid_2"
+    assert env["EWS_DISTRICT_REGION_FIELD"] == "name_1"
     assert env["EWS_EXPECTED_DISTRICTS"] == "135"
+
+
+def test_geoboundaries_level_chosen_by_metadata(tmp_path, monkeypatch):
+    # geoBoundaries Uganda: ADM2 = counties, ADM3 = districts. The metadata decides, not the level.
+    meta = {"ADM1": {"boundaryCanonical": "", "admUnitCount": "4"},
+            "ADM2": {"boundaryCanonical": "Counties", "admUnitCount": "151"},
+            "ADM3": {"boundaryCanonical": "District", "admUnitCount": "137",
+                     "boundaryLicense": "CC0 1.0 Universal (CC0 1.0) Public Domain Dedication"}}
+    seen = []
+
+    def fake_download(url, dest, session=None, **kw):
+        seen.append(url)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        level = url.split("/")[-2]
+        if url.endswith("-metaData.json"):
+            if level not in meta:
+                raise fetch.FetchError("404")
+            dest.write_text(json.dumps(meta[level]))
+        else:
+            gpd.GeoDataFrame({"shapeName": ["Bududa", "Lake Victoria"], "shapeID": ["X1", "X2"]},
+                             geometry=[box(34.2, 0.9, 34.5, 1.2), box(32.5, -1, 33.5, 0)],
+                             crs="EPSG:4326").to_file(dest, driver="GeoJSON")
+        return dest
+
+    monkeypatch.setattr(fetch, "download", fake_download)
+    env = read_env(fetch.fetch_districts_geoboundaries(tmp_path / "boundaries"))
+    assert env["EWS_DISTRICT_SRC"].endswith("geoBoundaries-UGA-ADM3.geojson")
+    assert env["EWS_DISTRICT_SOURCE_LABEL"] == "geoBoundaries gbOpen UGA ADM3 (District), CC0"
+    assert env["EWS_EXPECTED_DISTRICTS"] == "1"                  # the lake is not a district
+    assert env["EWS_DISTRICT_NAME_FIELD"] == "shapename" and env["EWS_DISTRICT_CODE_FIELD"] == "shapeid"
+    assert not any("ADM4" in u for u in seen)          # stops at the first district level
+
+
+def test_vendored_district_layer_is_uganda_districts():
+    from ews.synthetic import DISTRICTS
+
+    g = gpd.read_file(DISTRICTS)
+    assert len(g) == 137 and g.is_valid.all() and g.shapeID.is_unique
+    assert fetch.looks_like_uganda_districts(g.shapeName)
+    assert set(DISTRICT_NAMES) <= set(g.shapeName)
 
 
 def test_imerg_time_lon_lat_order_is_transposed(tmp_path):

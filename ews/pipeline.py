@@ -86,7 +86,8 @@ def compute_aux(name: str) -> int:
 def _pick_target(conn, pcode: str | None, end_date: date | None) -> tuple[str, date]:
     q = """SELECT d.pcode, x.end_date FROM ews.district_exceedance x
              JOIN ref.district d USING (district_id) JOIN ews.alert_level l ON l.level = x.alert_level
-            WHERE x.accum_days = 3 AND (CAST(:p AS text) IS NULL OR d.pcode = :p)
+            WHERE x.accum_days = 3
+              AND (CAST(:p AS text) IS NULL OR d.pcode = :p OR lower(d.name) = lower(:p))
               AND (CAST(:e AS date) IS NULL OR x.end_date = :e)
             ORDER BY l.rank DESC, x.ratio_to_p95 DESC NULLS LAST, x.end_date DESC
             LIMIT 1"""
@@ -109,7 +110,7 @@ def _chain(conn, district_id: int) -> list[dict]:
 
 def issue_alert(pcode: str | None = None, end_date: date | None = None, msg_type: str = "Alert",
                 status: str = "Exercise", approved_by: str | None = None, force: bool = False,
-                expires_hours: int = 48) -> Path:
+                expires_hours: int = 48, update_if_active: bool = False) -> Path:
     with connect() as conn:
         pcode, end_date = _pick_target(conn, pcode, end_date)
         d = conn.execute(text("""SELECT district_id, pcode, name, region, code_scheme, source,
@@ -144,6 +145,9 @@ def issue_alert(pcode: str | None = None, end_date: date | None = None, msg_type
     active = bool(chain) and chain[-1]["msg_type"] != "Cancel" and chain[-1]["expires"] > now
     if msg_type == "Alert" and x["alert_level"] == "none" and not force:
         raise RuntimeError(f"{d['name']} is not flagged on {end_date}; use --force to issue anyway")
+    if msg_type == "Alert" and active and update_if_active:
+        print(f"  {d['name']} already has an active alert ({chain[-1]['identifier']}): issuing an Update")
+        msg_type = "Update"
     if msg_type == "Alert" and active and not force:
         raise RuntimeError(f"{d['name']} already has an active alert ({chain[-1]['identifier']}); "
                            "issue --msg-type Update or Cancel instead")

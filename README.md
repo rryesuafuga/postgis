@@ -12,15 +12,39 @@ Run it in the browser with nothing installed: see [Quick start](#in-the-browser-
 
 ```
 CHIRPS v2.0 daily GeoTIFF ─┐            ┌─ ref.district (GiST) ───────────┐
-HDX COD-AB / GADM ─────────┼─ ogr2ogr ──┘                                 │  ST_Clip / ST_SummaryStatsAgg
+geoBoundaries / HDX / GADM ┼─ ogr2ogr ──┘                                 │  ST_Clip / ST_SummaryStatsAgg
                            │                                              ├──> ews.district_raster_stats
                            └─ raster2pgsql -t 100x100 -I -C ─ rain.* ─────┤    ews.district_exceedance ─> CAP 1.2 XML
 CHIRPS 1991-2020 ─ xarray P95 of 3-day totals ─ rain.clim_p95_3d ─────────┘    ops.operations_log         ─> Streamlit map
 ```
 
-![Streamlit map, synthetic test data](docs/streamlit-synthetic.png)
-*Screenshot from the **synthetic** offline fixture. The basemap is blank because the build sandbox
-could not reach the tile server; the PostGIS layers draw regardless.*
+## Screenshots
+
+Real district boundaries (geoBoundaries, 136 districts); **synthetic rainfall** with storms placed
+over Mt Elgon and the Rwenzori, so every alert is marked `Test`. The background map is blank
+because the build environment could not reach the tile server; the PostGIS layers draw regardless.
+
+![Overview: alert levels, KPIs, flagged districts](docs/screenshot-overview.png)
+
+| Rainfall grid rendered in PostGIS (`ST_Union` → `ST_ColorMap` → `ST_AsPNG`) | District time series and CAP 1.2 message |
+|---|---|
+| ![3-day rainfall grid under district outlines](docs/screenshot-rainfall-grid.png) | ![Time series and CAP message](docs/screenshot-timeseries-cap.png) |
+| **Integrity checks** (20 checks, including the verified backup) | **Operations log** (East Africa Time) |
+| ![Integrity checks](docs/screenshot-integrity.png) | ![Operations log](docs/screenshot-opslog.png) |
+
+## How this maps to the ToR
+
+| ToR duty | What the demo shows | Where |
+|---|---|---|
+| Geodatabase: data loading, spatial query, indexing | Districts loaded with `ogr2ogr`, rainfall with `raster2pgsql -I -C`; GiST indexes on vectors and rasters; zonal statistics in SQL; `EXPLAIN` showing the index in use; rainfall grid rendered with `ST_ColorMap` | steps 1-3, `sql/examples/adhoc_queries.sql` |
+| Integrity checks, backup verification, archive management | 20 integrity checks; `pg_dump` restored into a scratch database and checked, with checksum and retention; "Last verified backup" on the dashboard | Integrity checks tab, `scripts/backup.sh`, runbook |
+| Data standards and reference layers | District layer chosen by its metadata, water bodies excluded, documented name corrections; raster constraints reject a mis-gridded file | step 1, step 2 |
+| Reviewing threshold exceedances | 3-day totals against the 1991-2020 95th percentile for the time of year, plus fixed triggers, at Watch and Warning levels | step 4, map and flagged-districts table |
+| Warning products for authorisation; CAP issue, update, cancel | CAP 1.2 test alerts with severity, urgency, certainty, area polygon and geocode; `Draft` for the approving authority; Update and Cancel with references; `Actual` refused without a named approver | step 6, CAP messages tab |
+| Operations log and monthly reports | Every run, ingest, exceedance, alert, fault and backup is logged; a monthly report is generated from the log | Operations log tab, `python -m ews report` |
+| Fault diagnosis and escalation | Atomic re-ingest that rejects a bad file and logs a `FAULT`; structured `ESCALATION` entries | runbook |
+| Gridded forecast and satellite hazard products | CHIRPS, an IMERG cross-check (IMERG-style synthetic file in the demo), loader for ICPAC forecast layers | optional layers |
+| Container environments: status, logs, restart | Docker Compose services, `make status`, the Codespaces dev container | runbook |
 
 ## Contents
 
@@ -30,7 +54,7 @@ could not reach the tile server; the PostGIS layers draw regardless.*
 | `docker-compose.yml` | `db`: `postgis/postgis:16-3.4`. `tools` (optional): GDAL, PostGIS loaders, psql, Python |
 | `sql/01_schema.sql` | schemas `ref`, `rain`, `ews`, `ops`; results, CAP and operations-log tables |
 | `sql/02_seed_config.sql` | alert levels, trigger rules and the level to CAP urgency/severity/certainty mapping |
-| `sql/10_districts.sql` | normalises the ogr2ogr staging table (auto-detects COD-AB / GADM columns) |
+| `sql/10_districts.sql` | normalises the ogr2ogr staging table (auto-detects geoBoundaries / COD-AB / GADM columns, documented name fixes, water bodies excluded) |
 | `sql/11_rasters.sql` | registers raster2pgsql tables (date from file name, climatology catalogue) |
 | `sql/20_analysis.sql` | **step 3/4**: zonal statistics, in-database 3-day accumulation, exceedance flags |
 | `sql/90_integrity.sql` | `ops.integrity_checks()`: 20 checks used by the runbook and by backup verification |
@@ -39,6 +63,7 @@ could not reach the tile server; the PostGIS layers draw regardless.*
 | `scripts/20_load_rasters.sh` | **step 2**: `raster2pgsql -t 100x100 -I -C` |
 | `scripts/backup.sh`, `restore.sh`, `reingest_date.sh` | runbook procedures |
 | `ews/` | Python: downloads, xarray climatology, orchestration, CAP builder and validator |
+| `ews/fixtures/` | geoBoundaries Uganda district layer (CC0, simplified) used by the offline demo |
 | `app/streamlit_app.py` | **step 7**: map, flagged districts, time series, CAP messages, ops log |
 | `tests/` | CAP, climatology and downloader tests (downloaders run against local fakes of the real formats) |
 
@@ -71,13 +96,17 @@ Notes:
   link. It works only while your codespace is running.
 * Real data in a codespace: stop the app (Ctrl+C in the **app** terminal), then
   `make init fetch load compute alert` and `bash .devcontainer/start-app.sh real`.
+* A codespace created before an update: in a terminal, `git pull && make demo`, then restart the
+  app (Ctrl+C in the **app** terminal, then `bash .devcontainer/start-app.sh`).
 * Personal GitHub accounts include a free monthly Codespaces allowance (about 60 hours on the
   standard 2-core machine).
 
-### A. Offline demo (synthetic data, about 15 s)
+### A. Offline demo (real districts, synthetic rainfall, about 20 s)
 
-No downloads needed. It exercises every step, but the zones are Voronoi cells (not districts) and
-the rain is generated. Everything synthetic is labelled as such, and CAP status is forced to `Test`.
+No downloads needed. It exercises every step on Uganda's real district boundaries (a copy of the
+geoBoundaries layer ships in `ews/fixtures/`), with generated rainfall. The rainfall is labelled
+synthetic everywhere, and CAP status is forced to `Test`. It ends with a verified backup and the
+integrity checks.
 
 ```bash
 cp .env.example .env
@@ -98,7 +127,7 @@ No GDAL on the host? Run the same thing in the tools container:
 
 ```bash
 make up init
-make fetch      # districts (HDX COD-AB), CHIRPS daily for the event window, 1991-2020 inputs, P95
+make fetch      # districts (geoBoundaries), CHIRPS daily for the event window, 1991-2020 inputs, P95
 make load       # ogr2ogr + raster2pgsql
 make compute    # district statistics + exceedance flags
 make alert      # CAP 1.2 for the most severe flagged district (status Exercise)
@@ -120,19 +149,26 @@ data for a month are published around the third week of the following month.
 **1. Districts: `ogr2ogr` + GiST** (`scripts/10_load_districts.sh`)
 
 ```bash
-ogr2ogr -f PostgreSQL PG:"host=... dbname=ews user=ews" /vsizip/data/boundaries/hdx/uga_admbnda_..._shp.zip/uga_admbnda_adm2_....shp \
+ogr2ogr -f PostgreSQL PG:"host=... dbname=ews user=ews" data/boundaries/geoboundaries/geoBoundaries-UGA-ADM3.geojson \
   -nln ref.district_src -overwrite -nlt PROMOTE_TO_MULTI -t_srs EPSG:4326 -makevalid \
   -lco GEOMETRY_NAME=geom -lco SPATIAL_INDEX=NONE
 ```
 ```sql
-SELECT ref.normalize_districts('OCHA COD-AB ...', 'OCHA-PCODE');   -- dissolve, repair, upsert by P-code
+SELECT ref.normalize_districts('geoBoundaries ...', 'GEOBOUNDARIES-ID');  -- dissolve, repair, upsert by code
 CREATE INDEX IF NOT EXISTS district_geom_gist ON ref.district USING gist (geom);
 CLUSTER ref.district USING district_geom_gist;
 ```
-`python -m ews fetch-districts` finds the admin-2 (district) layer of `cod-ab-uga` through the HDX
-API. With `--source gadm` it takes the GADM 4.1 GeoPackage and picks the layer with 100-200
-features. GADM is free for non-commercial use only; COD-AB is the humanitarian standard and carries
-the P-codes used in the CAP `<geocode>`.
+`python -m ews fetch-districts` (default `--source geoboundaries`) downloads the geoBoundaries
+layer whose metadata says "District". **For Uganda that is ADM3; ADM2 is counties** (151 units
+such as Aringa and Dodoth), so choosing by level number would load the wrong units. Two data
+standards are applied on load and recorded in the operations log:
+* water-body units ("Lake Victoria", 28,000 km²) are excluded, leaving 136 districts;
+* two misspellings in the source are corrected through `ref.district_name_fix`
+  (Kalanga → Kalangala, Kitagwenga → Kitagwenda), checked against each unit's location.
+
+`--source hdx` loads OCHA COD-AB (admin 2 = district, UBOS P-codes, the humanitarian standard for
+the CAP `<geocode>`); `--source gadm` loads GADM 4.1 (non-commercial licence) and picks the layer
+whose names look like districts.
 
 **2. Rasters: `raster2pgsql -t 100x100 -I -C`** (`scripts/20_load_rasters.sh`)
 
@@ -159,9 +195,9 @@ SELECT d.district_id, r.obs_date,
 A district can span several tiles. `ST_SummaryStatsAgg` combines the per-tile `ST_SummaryStats`
 correctly (`sql/examples/adhoc_queries.sql` shows the explicit per-tile version and the weighted
 mean). Districts too small to contain a pixel centre fall back to the pixel under
-`ST_PointOnSurface` (`method = 'point'`). The results agree with an independent rasterio/numpy
-computation to within 0.16 mm. Small differences come from boundary pixels: PostGIS and GDAL
-disagree on one or two pixels in 7 of 50 zones.
+`ST_PointOnSurface` (`method = 'point'`); none of the 136 districts needs it at 0.05 degrees, but
+finer units (city divisions, sub-counties) would. The results match an independent rasterio/numpy
+computation exactly for all 136 districts: same pixel counts, mean, max and P95.
 
 **4. Exceedance** (`ews.compute_exceedance`)
 
@@ -195,10 +231,10 @@ report (`out/reports/`).
 
 ```bash
 python -m ews alert                                    # most severe flagged district, status Exercise
-python -m ews alert --district $PCODE --status Draft   # template for the approving authority
-python -m ews alert --district $PCODE --msg-type Update
-python -m ews alert --district $PCODE --msg-type Cancel
-python -m ews alert --district $PCODE --status Actual --approved-by "Name, Title"   # refused without approver
+python -m ews alert --district Bududa --status Draft   # template for the approving authority
+python -m ews alert --district Bududa --msg-type Update
+python -m ews alert --district Bududa --msg-type Cancel
+python -m ews alert --district Bududa --status Actual --approved-by "Name, Title"   # refused without approver
 python -m ews validate-cap out/cap/*.xml              # make cap-xsd adds the official OASIS XSD
 ```
 
@@ -216,7 +252,7 @@ and the same `<incidents>` id. A second `Alert` for a district with an active on
 `Draft` messages are templates and stay out of the lifecycle. The validator checks element order,
 required fields, enumerations, CAP dateTime format (UTC written as `-00:00`), references, polygon
 closure and ranges, and the official XSD when `schemas/CAP-v1.2.xsd` is present. A sample message
-from the synthetic run is in `docs/sample-cap-test-synthetic.xml`.
+from the demo run is in `docs/sample-cap-test-alert.xml`.
 
 **7. Map**: `make app`. District choropleth by alert level, 3-day total, ratio to P95 or % area
 above P95, plus an optional 3-day rainfall grid mosaicked and colour-mapped **inside PostGIS**
@@ -287,19 +323,26 @@ python -m ews log ESCALATION chirps-feed WARN "Escalated to ICPAC" --details '{"
 ## What was tested
 
 * `make demo` end to end on PostGIS 3.4.2 (Ubuntu 24.04) and on `postgis/postgis:16-3.4` (3.4.3),
-  from the host and from inside the `tools` image over the compose network.
+  from the host and from inside the `tools` image over the compose network: 136 districts, all 20
+  integrity checks passing, including the verified backup. Re-running it on an existing database
+  upgrades the schema in place and issues a CAP Update instead of a duplicate Alert.
+* District statistics checked against an independent rasterio/numpy computation: identical for
+  all 136 districts.
 * Backup (dump, checksum, TOC, verification restore, row counts, integrity), including a simulated
   failure. Re-ingest of a good file, and rejection of a file shifted half a cell. Alert → Update →
   Cancel lifecycle and its refusals (duplicate Alert, Actual without approver, Actual on synthetic data).
 * `pytest`: CAP builder and validator, climatology percentiles and gap handling, and the downloaders
   against local fakes of a CHC Africa `.tif.gz`, an ERDDAP NetCDF, an HDX package with a zipped
-  COD-AB shapefile, a GADM GeoPackage and an IMERG `(time, lon, lat)` file.
+  COD-AB shapefile, a GADM GeoPackage (districts and counties of similar size) and an IMERG
+  `(time, lon, lat)` file.
+* The geoBoundaries download against the live service: it skips ADM2 ("Counties", 151) and takes
+  ADM3 ("District", 137, of which Lake Victoria is excluded on load).
 * The dev container: with the dev container CLI (0.89, the engine behind Codespaces) on a fresh
   copy of the repository. The `tools` image was built from `docker/tools.Dockerfile` separately
   (this sandbox needs a proxy for pip), then `devcontainer up` ran `make demo` in the workspace
   container against the `db` service, and `start-app.sh` served the app on 8501, including
   rebuilding a missing demo database. Not yet opened in GitHub Codespaces itself.
-* **Not yet run against the live CHC, ERDDAP, HDX and GADM servers.** The build sandbox could not
+* **Not yet run against the live CHC, ERDDAP, HDX and GADM servers.** The build environment could not
   reach them. URL patterns and formats follow the providers' published conventions. Check the first
   real `make fetch` and report any 404 with `python -m ews log FAULT ...`.
 * Not tested against the official OASIS XSD (same reason). `make cap-xsd` downloads it, and
@@ -311,24 +354,12 @@ PostGIS also disables every GDAL output driver by default, so `01_schema.sql` en
 for the database (needed by `ST_AsPNG`). And `ST_ColorMap` entries must run from high to low: an
 ascending table gives a blank image.
 
-## How this maps to the ToR
-
-| ToR | here |
-|---|---|
-| PostgreSQL/PostGIS: schema, spatial indexing, query performance | `sql/`, GiST on vectors and rasters, `EXPLAIN` in `sql/examples` |
-| data loading, spatial query, indexing, integrity checks, backup verification, archive management | steps 1-4, `ops.integrity_checks()`, `scripts/backup.sh` with retention |
-| CAP: structure, validation, urgency/severity/certainty, polygons and geocodes, updates and cancellations | `ews/cap.py`, `python -m ews alert/validate-cap` |
-| operations log of status, alerts, faults and actions; monthly reports | `ops.operations_log`, `python -m ews report` |
-| first-line fault diagnosis, structured escalation | runbook, `python -m ews log FAULT/ESCALATION` |
-| gridded forecast data, satellite-derived hazard products, GDAL, Python | CHIRPS, IMERG/ICPAC loader, `ogr2ogr`/`raster2pgsql`, `ews/` |
-| containers: inspect status, logs, restart | `docker compose ps/logs/restart`, `make status` |
-
 ## Data sources and licences
 
 * **CHIRPS v2.0**: Funk et al. (2015), *Scientific Data* 2, 150066. UCSB Climate Hazards Center, public domain.
 * **OCHA COD-AB Uganda** (HDX `cod-ab-uga`, UBOS): admin 2 = 135 districts. Licence as stated on HDX.
 * **GADM 4.1**: free for academic and other non-commercial use.
-* **Natural Earth** 1:50m admin-0 (public domain, via `world-atlas`, ISC): Uganda outline used only for the synthetic fixture.
+* **geoBoundaries** gbOpen UGA ADM3 (districts; Wikimedia Commons source; CC0): Runfola et al. (2020), *PLoS ONE* 15(4): e0231866. Default boundary source, and the simplified copy in `ews/fixtures/`.
 * GPM IMERG (NASA GES DISC, Earthdata login) and ICPAC forecasts: supply the files yourself.
 
 This is a demonstration, not an operational warning service. Thresholds, CAP sender, identifiers

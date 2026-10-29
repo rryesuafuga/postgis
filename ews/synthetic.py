@@ -1,12 +1,11 @@
-"""SYNTHETIC test fixture for running the whole pipeline offline.
+"""SYNTHETIC rainfall for running the whole pipeline offline, over REAL district boundaries.
 
-Nothing produced here is an observation. It exists so the loaders, SQL, CAP export, integrity
-checks, backups and the map can be exercised without network access to CHC/HDX/GADM. Every
-artefact is labelled: file names start with `synthetic`, districts carry source "SYNTHETIC",
-and the CAP exporter forces status=Test when it sees synthetic inputs.
+The districts are real: a simplified copy of the geoBoundaries gbOpen Uganda ADM3 layer
+(137 districts, CC0; see ews/fixtures/README.md). The rainfall is not an observation. It exists
+so the loaders, SQL, CAP export, integrity checks, backups and the map can be exercised without
+network access to CHC/ERDDAP. Every rainfall artefact is labelled: file names start with
+`synthetic`, rasters carry product "SYNTHETIC", and the CAP exporter forces status=Test.
 
-  * zones:   Voronoi cells around ~50 town locations, clipped to the Natural Earth 1:50m Uganda
-             outline. They are NOT district boundaries.
   * rain:    spatially correlated gamma-like daily fields on the CHIRPS 0.05 degree grid, with a
              crude wet/dry pattern; two storms are injected into the event window
              (Mt Elgon around 28-31 July, Rwenzori around 24-25 July).
@@ -24,39 +23,11 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from . import grid
+from . import config, grid
 from .fetch import clim_window, daterange, write_source_env
 
 FIXTURES = Path(__file__).parent / "fixtures"
-
-# (name, lon, lat, region): approximate town locations used only as Voronoi seeds.
-TOWNS = [
-    ("Kampala", 32.58, 0.35, "Central"), ("Entebbe", 32.46, 0.05, "Central"),
-    ("Mukono", 32.75, 0.35, "Central"), ("Mityana", 32.04, 0.40, "Central"),
-    ("Luwero", 32.50, 0.84, "Central"), ("Nakasongola", 32.46, 1.31, "Central"),
-    ("Kayunga", 32.89, 0.70, "Central"), ("Kiboga", 31.77, 0.92, "Central"),
-    ("Mubende", 31.39, 0.56, "Central"), ("Masaka", 31.73, -0.33, "Central"),
-    ("Rakai", 31.41, -0.71, "Central"), ("Kalangala", 32.23, -0.31, "Central"),
-    ("Jinja", 33.20, 0.44, "Eastern"), ("Iganga", 33.48, 0.61, "Eastern"),
-    ("Kamuli", 33.12, 0.95, "Eastern"), ("Busia", 34.09, 0.47, "Eastern"),
-    ("Tororo", 34.18, 0.69, "Eastern"), ("Pallisa", 33.71, 1.15, "Eastern"),
-    ("Mbale", 34.18, 1.08, "Eastern"), ("Bududa", 34.33, 1.01, "Eastern"),
-    ("Kapchorwa", 34.45, 1.40, "Eastern"), ("Kumi", 33.94, 1.49, "Eastern"),
-    ("Soroti", 33.61, 1.71, "Eastern"), ("Katakwi", 33.97, 1.89, "Eastern"),
-    ("Amuria", 33.64, 2.03, "Eastern"), ("Nakapiripirit", 34.72, 1.85, "Northern"),
-    ("Moroto", 34.66, 2.53, "Northern"), ("Kotido", 34.13, 2.98, "Northern"),
-    ("Kaabong", 34.12, 3.52, "Northern"), ("Kitgum", 32.89, 3.28, "Northern"),
-    ("Pader", 33.08, 2.88, "Northern"), ("Gulu", 32.30, 2.77, "Northern"),
-    ("Lira", 32.90, 2.25, "Northern"), ("Apac", 32.54, 1.98, "Northern"),
-    ("Arua", 30.91, 3.02, "Northern"), ("Nebbi", 31.09, 2.48, "Northern"),
-    ("Adjumani", 31.79, 3.38, "Northern"), ("Moyo", 31.72, 3.66, "Northern"),
-    ("Masindi", 31.72, 1.68, "Western"), ("Hoima", 31.35, 1.43, "Western"),
-    ("Fort Portal", 30.27, 0.67, "Western"), ("Bundibugyo", 30.06, 0.71, "Western"),
-    ("Kasese", 30.08, 0.18, "Western"), ("Bushenyi", 30.19, -0.54, "Western"),
-    ("Mbarara", 30.65, -0.61, "Western"), ("Ntungamo", 30.26, -0.88, "Western"),
-    ("Rukungiri", 29.93, -0.79, "Western"), ("Kabale", 29.99, -1.25, "Western"),
-    ("Kisoro", 29.69, -1.28, "Western"), ("Kyenjojo", 30.64, 0.63, "Western"),
-]
+DISTRICTS = FIXTURES / "uga_districts_geoboundaries_adm3.geojson"
 
 # Injected storms: (centre lon, lat, sigma deg, {date: peak mm/day})
 STORMS = [
@@ -99,6 +70,11 @@ def daily_field(rng: np.random.Generator, mean: np.ndarray, wet_fraction: float 
     return np.where(wet, amount, 0.0).astype("float32")
 
 
+def _flush(arr: np.ndarray) -> np.ndarray:
+    """Amounts below 0.01 mm become 0, as in gauge and satellite products (and no denormals)."""
+    return np.where(arr < 0.01, 0.0, arr).astype("float32")
+
+
 def storm_rain(day: date) -> np.ndarray:
     add = np.zeros((grid.HEIGHT, grid.WIDTH), "float32")
     for lon0, lat0, sigma, peaks in STORMS:
@@ -108,32 +84,13 @@ def storm_rain(day: date) -> np.ndarray:
     return add
 
 
-def make_zones(out_dir: Path) -> Path:
-    import geopandas as gpd
-    from shapely import MultiPoint, Point, voronoi_polygons
-    from shapely.geometry import MultiPolygon
-
-    outline = gpd.read_file(FIXTURES / "uganda_outline_ne50m.geojson").geometry.iloc[0]
-    pts = [Point(lon, lat) for _, lon, lat, _ in TOWNS]
-    cells = voronoi_polygons(MultiPoint(pts), extend_to=outline.envelope.buffer(1.0))
-    rows = []
-    for cell in cells.geoms:
-        idx = next(i for i, p in enumerate(pts) if cell.contains(p))
-        name, _, _, region = TOWNS[idx]
-        geom = cell.intersection(outline)
-        if geom.is_empty:
-            continue
-        geom = geom if geom.geom_type == "MultiPolygon" else MultiPolygon([geom])
-        rows.append({"pcode": f"SYN{idx + 1:03d}", "name": f"{name} (synthetic zone)",
-                     "region": region, "geometry": geom})
-    gdf = gpd.GeoDataFrame(rows, crs="EPSG:4326").sort_values("pcode")
-    path = out_dir / "synthetic_zones.gpkg"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    gdf.to_file(path, layer="zones", driver="GPKG")
-    write_source_env(out_dir, str(path), "zones",
-                     "SYNTHETIC test zones (Voronoi on town locations; NOT official boundaries)",
-                     "SYNTHETIC-ID", len(gdf))
-    return path
+def use_districts(boundary_dir: Path) -> Path:
+    """Point the district loader at the vendored geoBoundaries district layer."""
+    boundary_dir.mkdir(parents=True, exist_ok=True)
+    write_source_env(boundary_dir, str(DISTRICTS.relative_to(config.ROOT)), None,
+                     "geoBoundaries gbOpen UGA ADM3 (District), CC0; simplified copy",
+                     "GEOBOUNDARIES-ID", 136, name="shapename", code="shapeid")   # 137 minus Lake Victoria
+    return DISTRICTS
 
 
 def make_all(root: Path, event_start: date, event_end: date, years: tuple[int, int],
@@ -142,13 +99,13 @@ def make_all(root: Path, event_start: date, event_end: date, years: tuple[int, i
     mean = mean_field()
     summary = {"root": str(root), "seed": seed}
 
-    summary["zones"] = str(make_zones(root / "boundaries"))
+    summary["districts"] = str(use_districts(root / "boundaries"))
 
     daily_dir = root / "chirps" / "daily"
     days = list(daterange(event_start - timedelta(days=2), event_end))
     series = []
     for d in days:
-        arr = daily_field(rng, mean) + storm_rain(d)
+        arr = _flush(daily_field(rng, mean) + storm_rain(d))
         series.append(arr)
         grid.write_geotiff(daily_dir / f"synthetic.{d:%Y.%m.%d}.tif", arr,
                            tags={"product": "SYNTHETIC (not CHIRPS)", "units": "mm/day",
@@ -160,7 +117,7 @@ def make_all(root: Path, event_start: date, event_end: date, years: tuple[int, i
     for year in range(years[0], years[1] + 1):
         s, e = clim_window(event_start, event_end, year, half_window)
         yr = np.random.default_rng(seed + year)
-        cube = np.stack([daily_field(yr, mean) for _ in daterange(s, e)])
+        cube = np.stack([_flush(daily_field(yr, mean)) for _ in daterange(s, e)])
         da = xr.DataArray(cube, dims=("time", "y", "x"), name="precip",
                           coords={"time": pd.date_range(s, e), "y": grid.LATS, "x": grid.LONS},
                           attrs={"units": "mm/day", "source": "SYNTHETIC"})
@@ -185,7 +142,7 @@ def make_all(root: Path, event_start: date, event_end: date, years: tuple[int, i
     summary["imerg_like"] = str(imerg_path)
 
     (root / "SYNTHETIC_DATA_README.txt").write_text(
-        "Everything under this directory is SYNTHETIC test data generated by ews/synthetic.py.\n"
-        "It is not CHIRPS, not IMERG, and the zones are not Uganda's districts.\n"
+        "The rainfall under this directory is SYNTHETIC test data generated by ews/synthetic.py.\n"
+        "It is not CHIRPS and not IMERG. The district boundaries are real (geoBoundaries ADM3).\n"
         + json.dumps(summary, indent=2) + "\n")
     return summary

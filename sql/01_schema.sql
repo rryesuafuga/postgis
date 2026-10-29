@@ -132,10 +132,10 @@ CREATE TABLE IF NOT EXISTS ews.district_raster_stats (
     district_id integer NOT NULL REFERENCES ref.district (district_id) ON DELETE CASCADE,
     product     text    NOT NULL,          -- 'chirps' or an auxiliary layer name
     obs_date    date    NOT NULL,
-    mean_mm     real,
-    max_mm      real,
-    min_mm      real,
-    stddev_mm   real,
+    mean_mm     double precision,
+    max_mm      double precision,
+    min_mm      double precision,
+    stddev_mm   double precision,
     pixel_count integer NOT NULL,
     method      text    NOT NULL CHECK (method IN ('clip', 'point')),
     run_id      bigint REFERENCES ops.pipeline_run (run_id) ON DELETE SET NULL,
@@ -149,12 +149,12 @@ CREATE TABLE IF NOT EXISTS ews.district_exceedance (
     district_id        integer  NOT NULL REFERENCES ref.district (district_id) ON DELETE CASCADE,
     end_date           date     NOT NULL,
     accum_days         smallint NOT NULL DEFAULT 3,
-    accum_mean_mm      real,
-    accum_max_mm       real,
-    p95_mean_mm        real,              -- district mean of the pixel P95 climatology
-    clim_mean_mm       real,              -- district mean of the climatological mean accumulation
-    ratio_to_p95       real,              -- accum_mean_mm / p95_mean_mm
-    frac_area_above_p95 real,             -- 0..1
+    accum_mean_mm      double precision,
+    accum_max_mm       double precision,
+    p95_mean_mm        double precision, -- district mean of the pixel P95 climatology
+    clim_mean_mm       double precision, -- district mean of the climatological mean accumulation
+    ratio_to_p95       double precision, -- accum_mean_mm / p95_mean_mm
+    frac_area_above_p95 double precision, -- 0..1
     pixel_count        integer,
     method             text,
     climatology        text NOT NULL,     -- climatology raster filename used
@@ -164,6 +164,17 @@ CREATE TABLE IF NOT EXISTS ews.district_exceedance (
     computed_at        timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (district_id, end_date, accum_days)
 );
+-- Upgrade databases created before results were double precision (casting a tiny value to
+-- real raises "underflow"). The view is recreated by 20_analysis.sql.
+DROP VIEW IF EXISTS ews.v_flagged;
+ALTER TABLE ews.district_raster_stats
+    ALTER COLUMN mean_mm TYPE double precision, ALTER COLUMN max_mm TYPE double precision,
+    ALTER COLUMN min_mm TYPE double precision, ALTER COLUMN stddev_mm TYPE double precision;
+ALTER TABLE ews.district_exceedance
+    ALTER COLUMN accum_mean_mm TYPE double precision, ALTER COLUMN accum_max_mm TYPE double precision,
+    ALTER COLUMN p95_mean_mm TYPE double precision, ALTER COLUMN clim_mean_mm TYPE double precision,
+    ALTER COLUMN ratio_to_p95 TYPE double precision, ALTER COLUMN frac_area_above_p95 TYPE double precision;
+
 CREATE INDEX IF NOT EXISTS district_exceedance_flag_idx
     ON ews.district_exceedance (end_date, alert_level) WHERE alert_level <> 'none';
 

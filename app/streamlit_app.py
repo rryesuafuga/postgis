@@ -102,11 +102,25 @@ if dates.empty:
 meta = q("""SELECT (SELECT string_agg(DISTINCT source, ', ') FROM ref.district) AS district_source,
                    (SELECT string_agg(DISTINCT product_source, ', ') FROM rain.chirps_daily) AS rain_source,
                    (SELECT string_agg(filename, ', ') FROM rain.climatology_catalog) AS climatology""").iloc[0]
-synthetic = "SYNTHETIC" in f"{meta.district_source} {meta.rain_source}".upper()
+synthetic_boundaries = "SYNTHETIC" in str(meta.district_source).upper()
+synthetic_rain = "SYNTHETIC" in str(meta.rain_source).upper()
 
+# Open on the window of the latest CAP message, else on the window with the most flags.
+alerted = q("""SELECT end_date FROM ews.cap_message
+                WHERE status <> 'Draft' AND end_date IS NOT NULL ORDER BY sent DESC LIMIT 1""")
 peak = q("""SELECT end_date FROM ews.district_exceedance x JOIN ews.alert_level l ON l.level = x.alert_level
              GROUP BY end_date ORDER BY sum(l.rank) DESC, end_date DESC LIMIT 1""")
-default_date = peak.end_date.iloc[0] if not peak.empty else dates.end_date.iloc[-1]
+if not alerted.empty and alerted.end_date.iloc[0] in set(dates.end_date):
+    default_date = alerted.end_date.iloc[0]
+else:
+    default_date = peak.end_date.iloc[0] if not peak.empty else dates.end_date.iloc[-1]
+
+
+def eat(ts) -> str:
+    """A timestamp from the database, shown in East Africa Time."""
+    t = pd.Timestamp(ts)
+    t = t.tz_localize("UTC") if t.tzinfo is None else t
+    return t.tz_convert("Africa/Kampala").strftime("%d %b %H:%M")
 
 # ------------------------------------------------------------------------------------------
 # Sidebar
@@ -128,11 +142,16 @@ st.sidebar.caption("Demonstration thresholds; warning authority rests with the d
 # Header + KPIs
 # ------------------------------------------------------------------------------------------
 st.title("District rainfall exceedance")
-st.caption(f"3-day CHIRPS accumulation ending {day:%d %B %Y} against the 1991-2020 95th percentile "
-           "for the time of year, and fixed triggers")
-if synthetic:
-    st.warning("**SYNTHETIC TEST DATA.** The zones are Voronoi cells, not districts, and the rainfall is "
-               "generated. Use this view to check the pipeline, not to read conditions in Uganda.", icon="⚠️")
+rain_label = "synthetic" if synthetic_rain else "CHIRPS"
+st.caption(f"3-day {rain_label} rainfall ending {day:%d %B %Y} against the {rain_label} 1991-2020 95th "
+           "percentile for the time of year, and fixed triggers")
+if synthetic_rain and not synthetic_boundaries:
+    st.warning("**SYNTHETIC RAINFALL.** The district boundaries are real, but the rainfall is generated "
+               "to exercise the pipeline, with storms placed over Mt Elgon and the Rwenzori. Do not read "
+               "it as conditions in Uganda.", icon="⚠️")
+elif synthetic_rain or synthetic_boundaries:
+    st.warning("**SYNTHETIC TEST DATA.** The boundaries and/or the rainfall are generated. Use this view "
+               "to check the pipeline, not to read conditions in Uganda.", icon="⚠️")
 
 res = q("""SELECT d.district_id, d.pcode, d.name, d.region, x.alert_level, x.accum_mean_mm, x.accum_max_mm,
                   x.p95_mean_mm, x.ratio_to_p95, 100 * x.frac_area_above_p95 AS pct_area,
@@ -142,6 +161,8 @@ res = q("""SELECT d.district_id, d.pcode, d.name, d.region, x.alert_level, x.acc
             WHERE x.end_date = :d AND x.accum_days = 3""", d=day)
 cap_active = q("""SELECT count(*) AS n FROM ews.v_cap_lifecycle
                    WHERE is_latest AND msg_type <> 'Cancel' AND expires > now()""").n.iloc[0]
+cap_window = q("""SELECT count(*) AS n FROM ews.cap_message
+                   WHERE end_date = :d AND status <> 'Draft'""", d=day).n.iloc[0]
 backup = q("""SELECT max(logged_at) AS t FROM ops.operations_log
                WHERE category = 'BACKUP' AND details ->> 'verified' = 'true'""").t.iloc[0]
 
@@ -150,8 +171,11 @@ k1.metric("■ Warning", int((res.alert_level == "warning").sum()), help="distri
 k2.metric("▲ Watch", int((res.alert_level == "watch").sum()), help="districts at watch level")
 top = res.sort_values("accum_mean_mm", ascending=False).iloc[0]
 k3.metric("Wettest district (3-day mean)", f"{top.accum_mean_mm:.0f} mm", top["name"], delta_color="off")
-k4.metric("Active CAP messages", int(cap_active))
-k5.metric("Last verified backup", "never" if pd.isna(backup) else pd.Timestamp(backup).strftime("%d %b %H:%M"))
+k4.metric("CAP messages, this window", int(cap_window),
+          help=f"Issued for the 3-day window ending {day:%d %b %Y}; {int(cap_active)} active right now "
+               "across all windows.")
+k5.metric("Last verified backup (EAT)", "never" if pd.isna(backup) else eat(backup),
+          help="pg_dump, then restored into a scratch database and checked (scripts/backup.sh)")
 
 # ------------------------------------------------------------------------------------------
 # Map
@@ -298,7 +322,8 @@ if not ts.empty:
             x="date:T", y="mean_mm:Q", detail="product:N",
             tooltip=["date:T", "product:N", alt.Tooltip("mean_mm:Q", format=".1f")]))
     st.altair_chart(alt.layer(*layers_ts).properties(height=260), use_container_width=True)
-    note = "Bars: CHIRPS daily district mean. Blue line: 3-day total. Grey dashed: P95 threshold."
+    note = (f"Bars: daily district mean ({rain_label}). Blue line: 3-day total. "
+            "Grey dashed: P95 threshold.")
     if not aux.empty:
         note += f" Orange: {', '.join(aux['product'].unique())} daily mean (cross-check)."
     st.caption(note)
@@ -308,9 +333,13 @@ if not ts.empty:
 # ------------------------------------------------------------------------------------------
 tab_cap, tab_log, tab_int = st.tabs(["CAP messages", "Operations log", "Integrity checks"])
 with tab_cap:
-    cm = q("""SELECT m.sent, m.msg_type, m.status, d.name AS district, m.severity, m.urgency, m.certainty,
-                     m.identifier, m.references_ids, m.expires, m.xml::text AS xml
-                FROM ews.cap_message m LEFT JOIN ref.district d USING (district_id) ORDER BY m.sent DESC""")
+    cm = q("""SELECT to_char(m.sent AT TIME ZONE 'Africa/Kampala', 'YYYY-MM-DD HH24:MI') AS "sent (EAT)",
+                     m.msg_type, m.status, d.name AS district, m.end_date AS "window end",
+                     m.severity, m.urgency, m.certainty, m.identifier, m.references_ids,
+                     to_char(m.expires AT TIME ZONE 'Africa/Kampala', 'YYYY-MM-DD HH24:MI') AS "expires (EAT)",
+                     m.xml::text AS xml
+                FROM ews.cap_message m LEFT JOIN ref.district d USING (district_id)
+               ORDER BY m.sent DESC, m.created_at DESC""")
     if cm.empty:
         st.info("No CAP messages yet: `python -m ews alert`.")
     else:
@@ -322,7 +351,8 @@ with tab_cap:
 with tab_log:
     cats = q("SELECT DISTINCT category FROM ops.operations_log ORDER BY 1").category.tolist()
     pick = st.multiselect("Categories", cats, default=cats)
-    log = q("""SELECT logged_at, category, severity, component, message, operator, run_id
+    log = q("""SELECT to_char(logged_at AT TIME ZONE 'Africa/Kampala', 'YYYY-MM-DD HH24:MI:SS') AS "logged (EAT)",
+                      category, severity, component, message, operator, run_id
                  FROM ops.operations_log WHERE category = ANY(:c) ORDER BY log_id DESC LIMIT 300""", c=pick)
     st.dataframe(log, hide_index=True, use_container_width=True)
 with tab_int:
@@ -330,4 +360,4 @@ with tab_int:
         q.clear()
     ic = q("SELECT * FROM ops.integrity_checks()")
     ic.insert(0, "", ic.status.map({"PASS": "✓", "WARN": "!", "FAIL": "✗"}))
-    st.dataframe(ic, hide_index=True, use_container_width=True)
+    st.dataframe(ic, hide_index=True, use_container_width=True, height=35 * (len(ic) + 1) + 3)

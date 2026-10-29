@@ -5,8 +5,10 @@ CHIRPS v2.0 (UCSB Climate Hazards Center), public domain
   * the same product as a subsettable NetCDF from NOAA ERDDAP (dataset chirps20GlobalDailyP05),
     which keeps the 1991-2020 climatology download to ~3 MB per year instead of ~1,500 Africa files.
 District boundaries
+  * geoBoundaries gbOpen (CC0): the layer whose metadata says "District". For Uganda that is ADM3;
+    ADM2 is counties, so the level number alone would load the wrong units.
   * OCHA COD-AB Uganda on HDX (dataset cod-ab-uga, admin 2 = district), via the HDX CKAN API
-  * GADM 4.1 GeoPackage (the district layer is picked by feature count)
+  * GADM 4.1 GeoPackage (the layer whose names look like Uganda's districts)
 Auxiliary layers
   * GPM IMERG daily NetCDF (Earthdata login required; download it yourself) or an ICPAC seasonal
     forecast GeoTIFF/NetCDF from the ICPAC data portals, converted by `prep_aux`.
@@ -17,6 +19,7 @@ Every raster is cropped/regridded to the analysis grid (ews.grid) before it reac
 from __future__ import annotations
 
 import gzip
+import json
 import shlex
 import shutil
 import tempfile
@@ -42,6 +45,10 @@ CHC_GLOBAL_DAILY = ("https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_daily/
 ERDDAP_CHIRPS = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/chirps20GlobalDailyP05.nc"
 HDX_PACKAGE = "https://data.humdata.org/api/3/action/package_show?id={id}"
 GADM_GPKG = "https://geodata.ucdavis.edu/gadm/gadm4.1/gpkg/gadm41_{iso}.gpkg"
+GEOBOUNDARIES = ("https://media.githubusercontent.com/media/wmgeolab/geoBoundaries/main/releaseData/"
+                 "gbOpen/{iso}/{level}/geoBoundaries-{iso}-{level}{suffix}")
+# District names that are not also county or region names: tells Uganda's district layer apart.
+UGANDA_DISTRICT_PROBES = ("bududa", "mbale", "kasese", "gulu", "kapchorwa")
 
 
 class FetchError(RuntimeError):
@@ -258,6 +265,50 @@ def _layers(path: str) -> list[tuple[str, int]]:
     return out
 
 
+def district_count(path: str, layer: str | None, name_col: str) -> int:
+    """Units in a boundary layer, not counting water bodies ("Lake ..."), which the loader skips."""
+    import pyogrio
+
+    df = pyogrio.read_dataframe(path, layer=layer, read_geometry=False)
+    col = next(c for c in df.columns if c.lower() == name_col.lower())
+    return int((~df[col].astype(str).str.match(r"(?i)^lake ")).sum())
+
+
+def looks_like_uganda_districts(names) -> bool:
+    found = {str(n).strip().lower() for n in names}
+    return sum(p in found for p in UGANDA_DISTRICT_PROBES) >= 4
+
+
+def fetch_districts_geoboundaries(boundary_dir: Path, iso: str = "UGA") -> Path:
+    """geoBoundaries gbOpen: the first ADM level whose metadata calls its units districts."""
+    s = _session()
+    out = boundary_dir / "geoboundaries"
+    chosen = None
+    for level in ("ADM1", "ADM2", "ADM3", "ADM4"):
+        meta_path = out / f"geoBoundaries-{iso}-{level}-metaData.json"
+        try:
+            download(GEOBOUNDARIES.format(iso=iso, level=level, suffix="-metaData.json"), meta_path, s)
+            meta = json.loads(meta_path.read_text())
+        except (FetchError, ValueError):
+            continue
+        canonical = meta.get("boundaryCanonical") or ""
+        print(f"  {level}: {canonical or '?'} ({meta.get('admUnitCount')} units)")
+        if "district" in canonical.lower():
+            chosen = (level, meta)
+            break
+    if chosen is None:
+        raise FetchError(f"no geoBoundaries level for {iso} is labelled as districts")
+    level, meta = chosen
+    dest = out / f"geoBoundaries-{iso}-{level}.geojson"
+    download(GEOBOUNDARIES.format(iso=iso, level=level, suffix=".geojson"), dest, s)
+    licence = meta.get("boundaryLicense", "")
+    label = (f"geoBoundaries gbOpen {iso} {level} ({meta['boundaryCanonical']}), "
+             f"{'CC0' if 'CC0' in licence else licence}")
+    count = district_count(str(dest), None, "shapeName")
+    return write_source_env(boundary_dir, str(dest), None, label, "GEOBOUNDARIES-ID", count,
+                            name="shapename", code="shapeid")
+
+
 def fetch_districts_hdx(boundary_dir: Path, dataset: str = "cod-ab-uga") -> Path:
     """OCHA COD-AB from HDX: find a shapefile/GeoPackage/GeoJSON resource and its admin-2 layer."""
     s = _session()
@@ -316,18 +367,32 @@ def fetch_districts_hdx(boundary_dir: Path, dataset: str = "cod-ab-uga") -> Path
 
 
 def fetch_districts_gadm(boundary_dir: Path, iso: str = "UGA") -> Path:
-    """GADM 4.1: choose the layer whose feature count looks like Uganda's districts (100-200)."""
+    """GADM 4.1: the layer with 100-200 features whose names look like Uganda's districts
+    (counties fall in the same size range, so the count alone is not enough)."""
+    import pyogrio
+
     url = GADM_GPKG.format(iso=iso)
     dest = boundary_dir / "gadm" / Path(url).name
     print(f"  GADM 4.1 -> {dest}")
     download(url, dest)
     layers = _layers(str(dest))
     print("  layers: " + ", ".join(f"{n} ({c})" for n, c in layers))
-    district = [(n, c) for n, c in layers if 100 <= c <= 200]
+    district = []
+    for name, count in layers:
+        level = name.rsplit("_", 1)[-1]
+        if not 100 <= count <= 200:
+            continue
+        if iso == "UGA":
+            df = pyogrio.read_dataframe(str(dest), layer=name, read_geometry=False)
+            col = next((c for c in df.columns if c.lower() == f"name_{level}"), None)
+            if col is None or not looks_like_uganda_districts(df[col]):
+                continue
+        district.append((name, count))
     if not district:
-        raise FetchError(f"no layer with 100-200 features in {dest}; set the layer manually")
-    layer, count = district[0]
+        raise FetchError(f"no district-like layer in {dest}; set EWS_DISTRICT_LAYER manually")
+    layer, _ = district[0]
     level = layer.rsplit("_", 1)[-1]
+    count = district_count(str(dest), layer, f"name_{level}")
     return write_source_env(boundary_dir, str(dest), layer, f"GADM 4.1 {iso} level {level}", "GADM-GID",
                             count, name=f"name_{level}", code=f"gid_{level}",
                             region=f"name_{int(level) - 1}" if level.isdigit() and int(level) > 1 else "")
