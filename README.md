@@ -53,8 +53,11 @@ repository's `.devcontainer/` sets it up completely.
    **Code** button, **Codespaces** tab, **Create codespace on main**).
 2. Wait about 5 minutes the first time. GitHub builds the database and the tools image, then loads
    the synthetic demo (`make demo`). The editor opens when that is done.
-3. The app starts by itself in a terminal named **app** and opens in a preview tab. For a full
-   browser tab, open the **Ports** panel, find port **8501**, and click the globe icon.
+3. The app starts by itself in a terminal named **app** and opens in a new browser tab. If your
+   browser blocks the pop-up, open the **Ports** panel, find port **8501**, and click the globe icon.
+   If the editor shows a "Trust the authors" question first, click **Trust Folder & Continue**.
+   If a preview pane inside the editor shows a broken-page icon, use its open-in-browser icon
+   (top right): Chrome often blocks the built-in preview.
 
 Notes:
 * Reopening later: go to [github.com/codespaces](https://github.com/codespaces) and open the same

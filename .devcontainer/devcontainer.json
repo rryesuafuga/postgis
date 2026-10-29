@@ -19,7 +19,8 @@
 
   "forwardPorts": [8501],
   "portsAttributes": {
-    "8501": { "label": "Streamlit app", "onAutoForward": "openPreview" }
+    // A full browser tab: the editor's built-in preview often shows a blank page in Chrome.
+    "8501": { "label": "Streamlit app", "onAutoForward": "openBrowser" }
   },
 
   "hostRequirements": { "cpus": 2, "memory": "4gb" },

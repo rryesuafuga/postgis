@@ -26,7 +26,7 @@ else
     fi
 fi
 
-echo "Starting the app ($PGDATABASE). It opens in a preview tab; for a full browser tab use the Ports panel (port 8501)."
+echo "Starting the app ($PGDATABASE). It opens in a new browser tab; if nothing opens, use the Ports panel: port 8501, globe icon."
 # CORS/XSRF checks off: Codespaces serves the app through its own forwarding domain.
 exec python -m streamlit run app/streamlit_app.py \
     --server.port 8501 --server.enableCORS false --server.enableXsrfProtection false
