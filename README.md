@@ -58,6 +58,10 @@ repository's `.devcontainer/` sets it up completely.
    If the editor shows a "Trust the authors" question first, click **Trust Folder & Continue**.
    If a preview pane inside the editor shows a broken-page icon, use its open-in-browser icon
    (top right): Chrome often blocks the built-in preview.
+4. **"HTTP ERROR 401" on the app's tab** (an address ending `-8501.app.github.dev`): the port is
+   private and the browser blocked the sign-in cookie. Either make the port public (**Ports**
+   panel, right-click 8501, **Port Visibility**, **Public**, then reload the tab), or allow
+   cookies for `[*.]app.github.dev` in the browser settings and reload.
 
 Notes:
 * Reopening later: go to [github.com/codespaces](https://github.com/codespaces) and open the same
