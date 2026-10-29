@@ -364,7 +364,9 @@ python -m ews log ESCALATION chirps-feed WARN "Escalated to ICPAC" --details '{"
   the forwarded port 8501 (after the 401 fix above).
 * The static page in Chromium (Playwright): no script errors and no requests outside the page,
   light and dark themes, no sideways scrolling at 390 px, and map and chart tooltips matching the
-  database (Bududa, window ending 31 Jul 2022: 3-day mean 153 mm, P95 44 mm, 3.45×).
+  database (Bududa, window ending 31 Jul 2022: 3-day mean 153 mm, P95 44 mm, 3.45×). Printing it
+  (or Save as PDF) gives five pages on A4 or Letter, in the light theme even from a dark screen,
+  with full tables, the triggers each district met, and the latest 12 log entries.
 * **Not yet run against the live CHC, ERDDAP, HDX and GADM servers.** The build environment could not
   reach them. URL patterns and formats follow the providers' published conventions. Check the first
   real `make fetch` and report any 404 with `python -m ews log FAULT ...`.

@@ -88,6 +88,8 @@ td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space:
 tr.clickable { cursor: pointer; }
 tr.clickable:hover td { background: var(--band); }
 .lvl { white-space: nowrap; }
+#oplog td:last-child, #integrity td:last-child { overflow-wrap: anywhere; }
+.print-only, .print-inline { display: none; }
 .pill { display: inline-block; padding: 0 7px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .pill.PASS { color: #fff; background: var(--good); }
 .pill.WARN { color: #0b0b0b; background: var(--caution); }
@@ -110,6 +112,32 @@ code { font-size: 12.5px; }
 footer { color: var(--muted); font-size: 12.5px; padding: 8px 0 40px; }
 .axis text { fill: var(--muted); font-size: 11px; }
 .gridline { stroke: var(--grid); }
+/* Print / Save as PDF: always the light theme (see beforeprint below), full tables, colours kept. */
+@media print {
+  @page { margin: 14mm 12mm; }
+  body { background: #fff; font-size: 12.5px; }
+  header.wrap { padding-top: 0; }
+  .wrap { max-width: none; padding: 0; }
+  .card, .kpi { border-color: #d6d5cf; }
+  .sw, .pill, .banner { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .scroll { max-height: none !important; overflow: visible !important; }
+  th { position: static; }
+  tr, .kpi, figure.card, #chartCard, #capCard, .controls { break-inside: avoid; }
+  h2 { break-after: avoid; }
+  .kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .kpi { padding: 8px 10px; }
+  .kpi .v { font-size: 18px; white-space: nowrap; }
+  #map { width: 58%; margin: 0 auto; }
+  .controls { padding: 10px 16px; }
+  input[type=range], .toggle, .btn, details, .screen-only, #tip { display: none !important; }
+  .print-only { display: table-cell; }
+  .print-inline { display: inline; }
+  #oplog { font-size: 11.5px; }
+  td.trig { font-size: 11px; color: var(--ink2); }
+  a { color: inherit; }
+  footer { padding: 4px 0 0; }
+  .about li { margin-bottom: 2px; }
+}
 </style>
 </head>
 <body>
@@ -128,7 +156,7 @@ footer { color: var(--muted); font-size: 12.5px; padding: 8px 0 40px; }
       <label class="title" for="date">3-day window ending <output id="dateOut"></output></label>
       <input type="range" id="date" min="0" step="1">
     </div>
-    <div>
+    <div class="screen-only">
       <span class="title" style="display:block;font-size:13px;color:var(--ink2);margin-bottom:4px">Colour districts by</span>
       <div class="seg" role="radiogroup" id="metric"></div>
     </div>
@@ -145,7 +173,7 @@ footer { color: var(--muted); font-size: 12.5px; padding: 8px 0 40px; }
         <g id="districts"></g>
       </svg>
       <div class="legend" id="legend"></div>
-      <p class="caption">Hover a district for its numbers; click one to chart it. The grid is CHIRPS-style
+      <p class="caption"><span class="screen-only">Hover a district for its numbers; click one to chart it. </span>The grid is CHIRPS-style
         0.05&deg; cells (about 5.5&nbsp;km).</p>
     </figure>
     <div class="card">
@@ -155,7 +183,7 @@ footer { color: var(--muted); font-size: 12.5px; padding: 8px 0 40px; }
     </div>
   </section>
 
-  <section class="card">
+  <section class="card" id="chartCard">
     <div class="chart-head">
       <h2 style="margin:0">District time series</h2>
       <label style="font-size:13px;color:var(--ink2)">District <select id="districtSel"></select></label>
@@ -165,7 +193,7 @@ footer { color: var(--muted); font-size: 12.5px; padding: 8px 0 40px; }
     <p class="caption" id="chartNote"></p>
   </section>
 
-  <section class="card">
+  <section class="card" id="capCard">
     <h2>CAP 1.2 messages</h2>
     <div class="scroll"><table id="cap"></table></div>
     <details id="capXmlBox"><summary>Show the CAP XML</summary><pre><code id="capXml"></code></pre></details>
@@ -178,7 +206,7 @@ footer { color: var(--muted); font-size: 12.5px; padding: 8px 0 40px; }
   </section>
 
   <section class="card">
-    <h2>Operations log <span style="font-weight:400;color:var(--muted);font-size:13px">(latest 40 entries, East Africa Time)</span></h2>
+    <h2>Operations log <span style="font-weight:400;color:var(--muted);font-size:13px">(latest <span class="screen-only" id="oplogN"></span><span class="print-inline" id="oplogNPrint"></span> entries, East Africa Time)</span></h2>
     <div class="scroll" style="max-height:380px"><table id="oplog"></table></div>
   </section>
 
@@ -299,7 +327,7 @@ const sel = $("districtSel");
 D.districts.forEach((d, i) => { const o = document.createElement("option"); o.value = i; o.textContent = d.name; sel.appendChild(o); });
 sel.addEventListener("change", () => { state.district = +sel.value; render(); });
 
-$("rulesNote").innerHTML = "Hover a row for the triggers it met. Triggers (demonstration thresholds): " +
+$("rulesNote").innerHTML = "<span class='screen-only'>Hover a row for the triggers it met. </span>Triggers (demonstration thresholds): " +
   D.rules.map((r) => `<b>${esc(r.rule_code)}</b> ${esc(r.description)} (${esc(r.level)})`).join("; ") +
   ". Warning authority rests with the designated national approving authority.";
 
@@ -377,12 +405,12 @@ function render() {
   const fl = topFlagged(date);
   $("flagged").innerHTML = fl.length
     ? "<thead><tr><th>Level</th><th>District</th><th class='n'>3-day mean</th><th class='n'>P95</th>" +
-      "<th class='n'>× P95</th><th class='n'>% &gt; P95</th></tr></thead><tbody>" +
+      "<th class='n'>× P95</th><th class='n'>% &gt; P95</th><th class='print-only'>Triggers</th></tr></thead><tbody>" +
       fl.map((i) => { const r = rows[i];
         const why = r[6].split(" ").map((c) => `${c}: ${RULES[c] ?? ""}`).join("\n");
         return `<tr class="clickable" data-i="${i}" title="${esc(why)}"><td>${levelHtml(r[5], false)}</td><td>${esc(D.districts[i].name)}</td>` +
           `<td class="n">${r[0].toFixed(0)} mm</td><td class="n">${r[2].toFixed(0)} mm</td><td class="n">${r[3].toFixed(2)}</td>` +
-          `<td class="n">${(100 * r[4]).toFixed(0)}%</td></tr>`; }).join("") +
+          `<td class="n">${(100 * r[4]).toFixed(0)}%</td><td class="print-only trig">${esc(r[6].split(" ").join(", "))}</td></tr>`; }).join("") +
       "</tbody>"
     : "<tbody><tr><td>No district meets a trigger for this window.</td></tr></tbody>";
   $("flagged").querySelectorAll("tr[data-i]").forEach((tr) =>
@@ -491,8 +519,10 @@ function drawChart() {
     D.integrity.map((r) => `<tr><td><span class="pill ${r.status}">${icon[r.status]} ${r.status}</span></td>` +
       `<td><code>${esc(r.check_name)}</code></td><td>${esc(r.detail)}</td></tr>`).join("") + "</tbody>";
 
+  $("oplogN").textContent = D.oplog.length;
+  $("oplogNPrint").textContent = Math.min(D.oplog.length, 12);
   $("oplog").innerHTML = "<thead><tr><th>Logged</th><th>Category</th><th>Severity</th><th>Component</th><th>Message</th></tr></thead><tbody>" +
-    D.oplog.map((r) => `<tr><td class="t">${esc(r.t)}</td><td>${esc(r.category)}</td><td>${esc(r.severity)}</td>` +
+    D.oplog.map((r, k) => `<tr${k >= 12 ? ' class="screen-only"' : ""}><td class="t">${esc(r.t)}</td><td>${esc(r.category)}</td><td>${esc(r.severity)}</td>` +
       `<td>${esc(r.component)}</td><td>${esc(r.message)}</td></tr>`).join("") + "</tbody>";
 
   const repo = D.meta.repo, f = (p) => `<a href="${repo}/blob/main/${p}"><code>${p}</code></a>`;
@@ -513,6 +543,16 @@ function drawChart() {
 
 render();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+// Paper is white: print in the light theme even when the screen is dark, then restore.
+let printLight = false;
+addEventListener("beforeprint", () => {
+  if (document.documentElement.dataset.theme) return;
+  document.documentElement.dataset.theme = "light"; printLight = true; hideTip(); render();
+});
+addEventListener("afterprint", () => {
+  if (!printLight) return;
+  delete document.documentElement.dataset.theme; printLight = false; render();
+});
 </script>
 </body>
 </html>
